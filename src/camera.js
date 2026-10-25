@@ -188,6 +188,7 @@ export class Camera extends EventEmitter {
       // Z bodies only accept movie recording once a host app has taken "application mode"
       // (stills work without it). Switch on demand and retry.
       if (this.info?.operations.includes(Op.NikonChangeApplicationMode)) {
+        this.emit('log', 'Switching camera to application mode so it will record video');
         await this.bridge.send(Op.NikonChangeApplicationMode, [1]);
         await this.waitReady();
         ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
