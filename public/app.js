@@ -8,7 +8,8 @@ const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let state = { connected: false, props: {} };
-const liveView = new LiveView($('lv'), { onFrame: () => { fitViewport(); drawFocusBox(); } });
+// https means the page came through the internet tunnel (LAN and localhost are plain http).
+const liveView = new LiveView($('lv'), { pull: location.protocol === 'https:', onFrame:() => { fitViewport(); drawFocusBox(); } });
 
 // ---------- API ----------
 async function api(path, body) {
@@ -20,11 +21,29 @@ async function api(path, body) {
   return data;
 }
 
+// Live updates arrive as server-sent events. Some proxies (Cloudflare quick tunnels) hold the
+// stream back entirely, so if the server's opening message never shows up, poll instead.
 const events = new EventSource('/api/events');
-events.addEventListener('state', e => { state = JSON.parse(e.data); render(); });
+let pollTimer = setTimeout(startPolling, 5000);
+events.addEventListener('state', e => { clearTimeout(pollTimer); pollTimer = null; state = JSON.parse(e.data); render(); });
 events.addEventListener('prop', e => { const p = JSON.parse(e.data); state.props[p.code] = p; renderProps(); });
 events.addEventListener('photo', e => addPhoto(JSON.parse(e.data), true));
 events.addEventListener('log', e => console.log('[camera]', JSON.parse(e.data)));
+
+function startPolling() {
+  console.log('Live event stream blocked by the connection; polling instead');
+  let last = '', tick = 0;
+  const poll = async () => {
+    try {
+      const text = JSON.stringify(await api('/api/state'));
+      // Only re-render on change, or an open dropdown would be rebuilt under the user every second.
+      if (text !== last) { last = text; state = JSON.parse(text); render(); }
+      if (tick++ % 3 === 0) (await api('/api/photos')).reverse().forEach(p => addPhoto(p, true));
+    } catch {}
+    if (pollTimer) pollTimer = setTimeout(poll, 1000);
+  };
+  poll();
+}
 
 // ---------- feedback ----------
 let toastTimer;
@@ -53,6 +72,74 @@ function flash() {
   requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
 }
 
+// ---------- capture mode + drive ----------
+// The shutter does what the mode says: photo runs the drive sequence, video toggles recording,
+// lapse toggles the time-lapse. Drive numbers live in the advanced Capture tab.
+let captureMode = 'photo';
+const drive = { mode: 'single', burst: 3, gap: 1, timer: 3, timerBurst: false, tlEvery: 5, tlFrames: 30 };
+try { Object.assign(drive, JSON.parse(localStorage.drive || '{}')); } catch {}
+const saveDrive = () => { try { localStorage.drive = JSON.stringify(drive); } catch {} };
+const BURSTS = [2, 3, 5, 10], TIMERS = [2, 3, 5, 10];
+
+function driveSequence() {
+  const timed = drive.mode === 'timer';
+  return { delay: timed ? drive.timer : 0, count: drive.mode === 'burst' || (timed && drive.timerBurst) ? drive.burst : 1, gap: drive.gap };
+}
+
+function primaryAction() {
+  if (captureMode === 'video') return actions.record();
+  if (captureMode === 'lapse') return timelapse ? stopTimelapse() : startTimelapse();
+  return actions.sequence();
+}
+
+function setMode(m, force = false) {
+  if (!force && (seq || timelapse || state.recordingSince)) return toast('Finish the current shots first', true);
+  captureMode = m;
+  const seg = $('modeSeg');
+  pickSeg(seg, seg.querySelector(`[data-mode="${m}"]`));
+  renderShutter();
+}
+
+// Moves a segmented control's sliding highlight to `btn`.
+function pickSeg(seg, btn) {
+  const buttons = [...seg.querySelectorAll('button')];
+  buttons.forEach(b => b.classList.toggle('on', b === btn));
+  seg.style.setProperty('--i', buttons.indexOf(btn));
+}
+
+function renderDrive() {
+  pickSeg($('driveSeg'), $('driveSeg').querySelector(`[data-drive="${drive.mode}"]`));
+  $('burstSub').textContent = `×${drive.burst}`;
+  $('timerSub').textContent = `${drive.timer}s`;
+  for (const seg of document.querySelectorAll('.seg[data-opt]')) {
+    const btn = [...seg.querySelectorAll('button')].find(b => +b.dataset.v === drive[seg.dataset.opt]);
+    if (btn) pickSeg(seg, btn);
+  }
+  $('timerBurst').checked = drive.timerBurst;
+  renderShutter();
+}
+
+function renderShutter() {
+  const rec = !!state.recordingSince, s = $('shutter');
+  s.classList.remove('photo', 'video', 'lapse');
+  s.classList.add(captureMode);
+  s.classList.toggle('rec', rec);
+  s.classList.toggle('run', !!timelapse);
+  s.classList.toggle('busy', !!seq);
+  s.disabled = !state.connected || (rec && captureMode !== 'video');
+  const label =
+    captureMode === 'video' ? (rec ? 'Stop' : 'Record') :
+    captureMode === 'lapse' ? (timelapse ? 'Stop lapse' : 'Start lapse') :
+    drive.mode === 'burst' ? `Burst ×${drive.burst}` :
+    drive.mode === 'timer' ? `Timer ${drive.timer}s${drive.timerBurst ? ` ×${drive.burst}` : ''}` : 'Shoot';
+  $('shutterLabel').textContent = label;
+  s.setAttribute('aria-label', label);
+  s.title = `${label} (Space)`;
+  $('cancelBtn').classList.toggle('hidden', !seq && !timelapse);
+  $('modeSeg').classList.toggle('locked', !!(seq || timelapse || rec));
+  $('driveSeg').classList.toggle('off', captureMode !== 'photo');
+}
+
 // ---------- shooting sequences ----------
 // One sequence at a time; any new trigger while one runs is ignored, "cancel" stops it.
 let seq = null;
@@ -78,6 +165,8 @@ async function countdown(secs, token) {
 async function shootOnce() {
   beep(1600, 140);
   flash();
+  $('shutter').classList.add('firing');
+  setTimeout(() => $('shutter').classList.remove('firing'), 170);
   try {
     clap.quiet(2500); // the shutter itself is loud enough to count as a clap
     const r = await api('/api/shoot', { af: $('afBefore').checked });
@@ -88,10 +177,10 @@ async function shootOnce() {
   } catch (e) { toast(e.message, true); return false; }
 }
 
-async function runSequence({ delay = +$('delay').value, count = +$('count').value, gap = +$('gap').value, label } = {}) {
+async function runSequence({ delay = driveSequence().delay, count = driveSequence().count, gap = drive.gap, label } = {}) {
   if (seq) return toast('Already shooting — say “cancel” to stop');
   const token = (seq = { cancelled: false });
-  $('shutter').classList.add('busy');
+  renderShutter();
   try {
     if (delay) await countdown(delay, token);
     for (let i = 1; i <= count && !token.cancelled; i++) {
@@ -101,7 +190,7 @@ async function runSequence({ delay = +$('delay').value, count = +$('count').valu
     }
   } finally {
     seq = null; seqStatus('');
-    $('shutter').classList.remove('busy');
+    renderShutter();
   }
 }
 
@@ -114,9 +203,10 @@ function cancel() {
 let timelapse = null;
 async function startTimelapse() {
   if (timelapse || seq) return;
-  const every = +$('tlEvery').value, frames = +$('tlFrames').value || Infinity;
+  const every = drive.tlEvery, frames = drive.tlFrames || Infinity;
   const token = (timelapse = { cancelled: false });
-  $('tlBtn').textContent = 'Stop time-lapse'; $('tlBtn').classList.add('active');
+  if (captureMode !== 'lapse') setMode('lapse', true);
+  renderShutter();
   for (let i = 1; i <= frames && !token.cancelled; i++) {
     const t0 = Date.now();
     seqStatus(`Time-lapse ${i}${frames === Infinity ? '' : `/${frames}`}`);
@@ -128,7 +218,7 @@ async function startTimelapse() {
 function stopTimelapse() {
   if (timelapse) timelapse.cancelled = true;
   timelapse = null; seqStatus('');
-  $('tlBtn').textContent = 'Start time-lapse'; $('tlBtn').classList.remove('active');
+  renderShutter();
 }
 
 // ---------- actions (shared by buttons, keys, voice, gestures, clap) ----------
@@ -162,6 +252,8 @@ export const actions = {
   record: on => setRecording(on ?? !state.recordingSince),
   zoom: dir => setZoom(dir === 'in' ? Math.min(ZOOMS.length - 1, zoomIndex + 1) : dir === 'out' ? Math.max(0, zoomIndex - 1) : (zoomIndex + 1) % ZOOMS.length),
   timelapse: on => (on ? startTimelapse() : stopTimelapse()),
+  advise: () => suggestSettings(),
+  applyAdvice: () => applyAdvice(),
 };
 
 // ---------- rendering ----------
@@ -169,8 +261,8 @@ function render() {
   $('connDot').classList.toggle('on', state.connected);
   const model = (state.model || state.name || '').replace(/_(\d)$/, (_, n) => 'I'.repeat(+n)); // "Z50_2" → "Z50II"
   $('camName').textContent = state.connected ? `Nikon ${model}` : (state.error || 'Camera disconnected');
-  $('shutter').disabled = !state.connected;
-  $('lvBtn').classList.toggle('active', state.wantLiveView);
+  $('lvBtn').classList.toggle('active', !!state.wantLiveView);
+  $('lvBtn').setAttribute('aria-pressed', !!state.wantLiveView);
   const showLv = state.connected && state.wantLiveView;
   $('viewport').classList.toggle('hidden', !showLv);
   $('lvPlaceholder').classList.toggle('hidden', showLv);
@@ -181,40 +273,119 @@ function render() {
 }
 
 const EXPOSURE_ROWS = ['aperture', 'shutter', 'iso', 'ev', 'wb', 'metering', 'focus', 'quality', 'size'];
+const CHIP_ROWS = ['aperture', 'shutter', 'iso', 'ev', 'wb', 'focus'];
+const MINUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg>';
+const PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>';
+
+function propsByName() {
+  const by = {};
+  for (const [code, p] of Object.entries(state.props)) { p.code = +code; by[p.name] = p; }
+  return by;
+}
+const editable = p => !!p?.writable && p.values?.length > 1;
+function bump(el) { el.classList.remove('bump'); el.offsetWidth; el.classList.add('bump'); }
+function setText(el, text) { if (el.textContent !== text) { const had = el.textContent; el.textContent = text; if (had) bump(el); } }
+
+// Sets a property, showing the new value straight away so the ruler and tiles move with the
+// click; the camera's own event confirms it (or the old value comes back with an error).
+async function setProp(name, v) {
+  const p = propsByName()[name];
+  if (!p) return;
+  const prev = p.value;
+  p.value = v; renderProps();
+  try { await api('/api/prop', { code: p.code, value: v }); }
+  catch (e) { p.value = prev; renderProps(); toast(e.message, true); }
+}
+function nudge(name, d) {
+  const p = propsByName()[name];
+  if (!editable(p)) return PROP[name] && step(name, d);
+  const i = p.values.indexOf(p.value) + d;
+  if (i >= 0 && i < p.values.length) setProp(name, p.values[i]);
+}
+
+// Chips and tiles are built once and updated in place, so values can animate when they change.
+for (const name of CHIP_ROWS) {
+  const chip = document.createElement('button');
+  chip.className = 'chip hidden'; chip.dataset.name = name;
+  chip.innerHTML = '<span class="l"></span><span class="v mono"></span>';
+  chip.querySelector('.l').textContent = LABEL[name];
+  chip.onclick = () => { openChip = openChip === name ? null : name; renderProps(); };
+  $('chips').append(chip);
+}
+for (const name of EXPOSURE_ROWS) {
+  const tile = document.createElement('div');
+  tile.className = 'tile hidden'; tile.dataset.name = name;
+  tile.innerHTML = `<span class="l"></span><div class="row"><select class="mono"></select>
+    <button class="mini" aria-label="Decrease">${MINUS}</button><button class="mini" aria-label="Increase">${PLUS}</button></div>`;
+  tile.querySelector('.l').textContent = LABEL[name];
+  const sel = tile.querySelector('select');
+  sel.setAttribute('aria-label', LABEL[name]);
+  sel.onchange = () => {
+    const p = propsByName()[name];
+    setProp(name, typeof p.value === 'string' ? sel.value : +sel.value);
+  };
+  const [down, up] = tile.querySelectorAll('.mini');
+  down.onclick = () => nudge(name, -1);
+  up.onclick = () => nudge(name, +1);
+  $('exposure').append(tile);
+}
+
+let openChip = null, rulerKey = '';
+function renderRuler(by) {
+  const p = openChip && by[openChip];
+  $('ruler').classList.toggle('hidden', !p);
+  if (!p) { rulerKey = ''; return; }
+  const track = $('rtrack'), key = `${p.name}:${p.values.join()}`;
+  const rebuilt = key !== rulerKey;
+  if (rebuilt) {
+    rulerKey = key;
+    track.style.transition = 'none';
+    track.replaceChildren(...p.values.map(v => {
+      const b = document.createElement('button');
+      b.className = 'tick'; b.textContent = fmt(p.name, v);
+      b.onclick = () => setProp(p.name, v);
+      return b;
+    }));
+  }
+  const i = Math.max(0, p.values.indexOf(p.value));
+  [...track.children].forEach((b, j) => b.classList.toggle('on', j === i));
+  track.style.transform = `translateX(${-(i * 80 + 40)}px)`;
+  if (rebuilt) { track.offsetWidth; track.style.transition = ''; }
+}
 
 function renderProps() {
-  const props = Object.entries(state.props).map(([code, p]) => ({ code: +code, ...p }));
-  const by = Object.fromEntries(props.map(p => [p.name, p]));
+  const by = propsByName();
   $('modeBadge').textContent = by.mode ? fmt('mode', by.mode.value) : '–';
-  $('batteryBadge').textContent = by.battery ? fmt('battery', by.battery.value) : '–';
+  $('batteryBadge').textContent = by.battery ? `${by.battery.value}%` : '–';
 
-  const box = $('exposure');
-  box.innerHTML = '';
-  for (const name of EXPOSURE_ROWS) {
-    const p = by[name];
+  if (openChip && !editable(by[openChip])) openChip = null;
+  for (const chip of $('chips').children) {
+    const p = by[chip.dataset.name];
+    chip.classList.toggle('hidden', !p);
     if (!p) continue;
-    const label = document.createElement('div');
-    label.className = 'name'; label.textContent = LABEL[name];
-    const ctl = document.createElement('div');
-    ctl.className = 'stepper';
-    const sel = document.createElement('select');
-    const values = p.values?.length ? p.values : [p.value];
-    for (const v of values) sel.add(new Option(fmt(name, v), v, false, v === p.value));
-    sel.disabled = !p.writable || values.length < 2;
-    sel.onchange = async () => {
-      const v = typeof p.value === 'string' ? sel.value : +sel.value;
-      try { await api('/api/prop', { code: p.code, value: v }); } catch (e) { toast(e.message, true); renderProps(); }
-    };
-    ctl.append(sel);
-    if (PROP[name]) {
-      for (const [txt, d] of [['−', -1], ['+', 1]]) {
-        const b = document.createElement('button');
-        b.textContent = txt; b.disabled = sel.disabled;
-        b.onclick = () => step(name, d);
-        ctl.append(b);
-      }
+    setText(chip.querySelector('.v'), fmt(p.name, p.value));
+    chip.disabled = !editable(p);
+    chip.classList.toggle('on', openChip === p.name);
+    chip.setAttribute('aria-expanded', openChip === p.name);
+  }
+  renderRuler(by);
+
+  for (const tile of $('exposure').children) {
+    const p = by[tile.dataset.name];
+    tile.classList.toggle('hidden', !p);
+    if (!p) continue;
+    const sel = tile.querySelector('select'), values = p.values?.length ? p.values : [p.value];
+    const sig = values.join();
+    // Leave an open dropdown alone rather than rebuilding it under the user.
+    if (sel.dataset.sig !== sig && document.activeElement !== sel) {
+      sel.dataset.sig = sig;
+      sel.replaceChildren(...values.map(v => new Option(fmt(p.name, v), v)));
     }
-    box.append(label, ctl);
+    if (sel.value !== String(p.value)) { sel.value = p.value; bump(sel); }
+    const locked = !editable(p);
+    sel.disabled = locked;
+    tile.classList.toggle('locked', locked);
+    tile.querySelectorAll('.mini').forEach(b => { b.disabled = locked; });
   }
   const mode = by.mode && fmt('mode', by.mode.value);
   $('modeHint').textContent = !mode ? '' :
@@ -224,7 +395,10 @@ function renderProps() {
 }
 
 // ---------- gallery ----------
+const shownPhotos = new Set();
 function addPhoto(p, fresh = false) {
+  if (shownPhotos.has(p.url)) return;
+  shownPhotos.add(p.url);
   const b = document.createElement('button');
   b.title = p.name;
   const img = new Image();
@@ -240,26 +414,129 @@ function addPhoto(p, fresh = false) {
     $('viewerDownload').href = p.url; $('viewerDownload').download = p.name;
     $('viewer').showModal();
   };
+  b.dataset.thumb = p.thumb;
   if (fresh) { b.classList.add('new'); setTimeout(() => b.classList.remove('new'), 2000); }
   $('strip').prepend(b);
+  renderStack(fresh);
 }
+
+// The pile of the three latest shots under the controls; tapping it opens the shots drawer.
+function renderStack(fresh) {
+  const latest = [...$('strip').children].slice(0, 3);
+  ['s0', 's1', 's2'].forEach((cls, i) => {
+    $('stack').querySelector(`.${cls}`).style.backgroundImage = latest[i] ? `url("${latest[i].dataset.thumb}")` : '';
+  });
+  $('shotCount').textContent = $('strip').children.length;
+  if (fresh) bump($('stack'));
+}
+function toggleFilm(open = !$('film').classList.contains('open')) {
+  $('film').classList.toggle('open', open);
+  $('stackBtn').setAttribute('aria-expanded', open);
+}
+$('stackBtn').onclick = () => toggleFilm();
 $('viewerClose').onclick = () => $('viewer').close();
 $('viewer').addEventListener('close', () => { $('viewerVideo').pause(); $('viewerVideo').removeAttribute('src'); });
 $('viewer').onclick = e => { if (e.target === $('viewer')) $('viewer').close(); };
 api('/api/photos').then(list => list.reverse().forEach(p => addPhoto(p)));
 
 // ---------- controls ----------
-$('shutter').onclick = () => actions.sequence();
+$('shutter').onclick = primaryAction;
 $('afBtn').onclick = () => actions.focus();
 $('cancelBtn').onclick = cancel;
 $('lvBtn').onclick = () => actions.liveView(!state.wantLiveView);
-$('gridBtn').onclick = () => { $('grid').classList.toggle('hidden'); $('gridBtn').classList.toggle('active'); };
+$('gridBtn').onclick = () => {
+  const on = $('grid').classList.toggle('on');
+  $('gridBtn').classList.toggle('active', on);
+  $('gridBtn').setAttribute('aria-pressed', on);
+};
 $('reconnectBtn').onclick = () => api('/api/reconnect', {}).catch(e => toast(e.message, true));
-$('tlBtn').onclick = () => (timelapse ? stopTimelapse() : startTimelapse());
-$('recBtn').onclick = () => actions.record();
 $('zoomBtn').onclick = () => actions.zoom();
 $('viewport').addEventListener('click', tapToFocus);
-window.addEventListener('resize', () => fitViewport(true));
+// The stage resizes when the advanced drawer slides open, not only with the window.
+new ResizeObserver(() => fitViewport(true)).observe($('stage'));
+
+for (const b of $('modeSeg').querySelectorAll('button')) b.onclick = () => setMode(b.dataset.mode);
+for (const b of $('driveSeg').querySelectorAll('button')) {
+  b.onclick = () => {
+    const m = b.dataset.drive;
+    // Tapping the active Burst/Timer again steps through its counts, like a camera's drive dial.
+    if (drive.mode === m && m === 'burst') drive.burst = BURSTS[(BURSTS.indexOf(drive.burst) + 1) % BURSTS.length];
+    else if (drive.mode === m && m === 'timer') drive.timer = TIMERS[(TIMERS.indexOf(drive.timer) + 1) % TIMERS.length];
+    drive.mode = m;
+    saveDrive(); renderDrive();
+  };
+}
+for (const seg of document.querySelectorAll('.seg[data-opt]')) {
+  for (const b of seg.querySelectorAll('button')) {
+    b.onclick = () => { drive[seg.dataset.opt] = +b.dataset.v; saveDrive(); renderDrive(); };
+  }
+}
+$('timerBurst').onchange = () => { drive.timerBurst = $('timerBurst').checked; saveDrive(); renderShutter(); };
+renderDrive();
+
+// ---------- exposure ruler ----------
+$('rulerDown').onclick = () => openChip && nudge(openChip, -1);
+$('rulerUp').onclick = () => openChip && nudge(openChip, +1);
+$('ruler').addEventListener('wheel', e => {
+  if (!openChip) return;
+  e.preventDefault();
+  nudge(openChip, Math.sign(e.deltaY || e.deltaX));
+}, { passive: false });
+
+// ---------- advanced drawer ----------
+const TABS = ['capture', 'exposure', 'triggers', 'advisor'];
+let tab = 'capture';
+function showTab(name) {
+  const dir = TABS.indexOf(name) >= TABS.indexOf(tab) ? 1 : -1;
+  tab = name;
+  pickSeg($('tabs'), $('tabs').querySelector(`[data-tab="${name}"]`));
+  for (const b of $('tabs').querySelectorAll('button')) b.setAttribute('aria-selected', b.dataset.tab === name);
+  for (const pane of document.querySelectorAll('.pane')) {
+    const on = pane.dataset.pane === name;
+    pane.classList.toggle('hidden', !on);
+    if (on) pane.style.setProperty('--dir', `${dir * 24}px`);
+  }
+  $('expoMore').classList.toggle('active', advOpen && name === 'exposure');
+}
+let advOpen = false;
+function toggleAdv(open = !advOpen, name) {
+  advOpen = open;
+  if (name) showTab(name);
+  $('app').classList.toggle('adv-open', open);
+  $('adv').inert = !open;
+  $('advToggle').setAttribute('aria-expanded', open);
+  $('expoMore').classList.toggle('active', open && tab === 'exposure');
+}
+for (const b of $('tabs').querySelectorAll('button')) b.onclick = () => showTab(b.dataset.tab);
+$('advToggle').onclick = () => toggleAdv();
+$('advClose').onclick = () => toggleAdv(false);
+$('expoMore').onclick = () => (advOpen && tab === 'exposure' ? toggleAdv(false) : toggleAdv(true, 'exposure'));
+$('scrim').onclick = () => toggleAdv(false);
+
+// On a phone in portrait the drawer is a bottom sheet: drag its header down to dismiss it.
+const sheetMode = matchMedia('(max-width: 820px) and (min-height: 501px)');
+let drag = null;
+$('adv').querySelector('.adv-head').addEventListener('pointerdown', e => {
+  if (!sheetMode.matches || e.target.closest('button')) return;
+  drag = { y: e.clientY, t: performance.now(), dy: 0 };
+  e.currentTarget.setPointerCapture(e.pointerId);
+  $('adv').classList.add('dragging');
+});
+$('adv').querySelector('.adv-head').addEventListener('pointermove', e => {
+  if (!drag) return;
+  drag.dy = Math.max(0, e.clientY - drag.y);
+  $('adv').style.setProperty('--drag', `${drag.dy}px`);
+});
+const endDrag = () => {
+  if (!drag) return;
+  const fling = drag.dy / (performance.now() - drag.t) > 0.5;
+  $('adv').classList.remove('dragging');
+  $('adv').style.removeProperty('--drag');
+  if (drag.dy > 90 || (fling && drag.dy > 20)) toggleAdv(false);
+  drag = null;
+};
+$('adv').querySelector('.adv-head').addEventListener('pointerup', endDrag);
+$('adv').querySelector('.adv-head').addEventListener('pointercancel', endDrag);
 
 // ---------- live view framing: fit, focus box, tap-to-focus, zoom ----------
 let fitted = '';
@@ -304,7 +581,7 @@ let zoomIndex = 0;
 function setZoom(i) {
   zoomIndex = i;
   $('viewport').style.transform = ZOOMS[i] === 1 ? '' : `scale(${ZOOMS[i]})`;
-  $('zoomBtn').textContent = `Zoom ${ZOOMS[i]}×`;
+  $('zoomLabel').textContent = `${ZOOMS[i]}×`;
   $('zoomBtn').classList.toggle('active', i > 0);
   drawFocusBox();
 }
@@ -319,27 +596,82 @@ async function setRecording(on) {
 let recTimer;
 function renderRecording() {
   const since = state.recordingSince;
-  $('recBtn').classList.toggle('on', !!since);
-  $('recLabel').textContent = since ? 'Stop recording (R)' : 'Record video (R)';
   $('recBadge').classList.toggle('hidden', !since);
-  $('shutter').disabled = !state.connected || !!since;
+  // Recording started some other way (R, voice) still shows the stop button.
+  if (since && captureMode !== 'video') setMode('video', true);
+  renderShutter();
   clearInterval(recTimer);
   if (!since) return;
   const tick = () => {
     const s = Math.floor((Date.now() - since) / 1000);
-    $('recBadge').textContent = `● REC ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    $('recBadge').textContent = `REC ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
   tick();
   recTimer = setInterval(tick, 500);
 }
 
+// ---------- shot advisor ----------
+let advice = null;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+async function suggestSettings() {
+  const btn = $('advBtn');
+  if (btn.classList.contains('busy')) return;
+  btn.classList.add('busy'); btn.textContent = 'Looking at the scene…';
+  try {
+    advice = await api('/api/advise', { scene: $('advScene').value, notes: $('advNotes').value, model: $('advModel').value });
+    renderAdvice();
+    toggleAdv(true, 'advisor');
+  } catch (e) { toast(e.message, true); }
+  finally { btn.classList.remove('busy'); btn.textContent = 'Suggest settings (A)'; }
+}
+
+function renderAdvice() {
+  const box = $('advResult');
+  box.classList.toggle('hidden', !advice);
+  if (!advice) return;
+  const changes = advice.settings.filter(s => !s.same && s.writable);
+  const rows = advice.settings.map(s => {
+    const cls = s.same ? 'same' : s.writable ? '' : 'locked';
+    const val = s.same ? `${esc(s.display)} ✓` : `${esc(s.current)} → <b>${esc(s.display)}</b>`;
+    return `<span class="name">${esc(s.label)}</span><span class="val ${cls}">${val}</span>${s.reason ? `<span class="why">${esc(s.reason)}</span>` : ''}`;
+  }).join('');
+  const locked = advice.settings.some(s => !s.same && !s.writable);
+  box.innerHTML = `
+    <p class="summary">${esc(advice.summary)}</p>
+    ${advice.mode ? `<p class="mode">Suggested mode: ${esc(advice.mode)}${locked ? ' — turn the dial to unlock the struck-out settings' : ''}</p>` : ''}
+    <div class="adv-settings">${rows || '<span class="name">No changes suggested</span>'}</div>
+    ${advice.tips.length ? `<ul>${advice.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+    ${changes.length ? `<button id="advApply" class="secondary wide">Apply ${changes.length} change${changes.length > 1 ? 's' : ''}</button>` : ''}
+    <p class="hint">${esc(advice.model)}</p>`;
+  $('advApply')?.addEventListener('click', applyAdvice);
+}
+
+async function applyAdvice() {
+  if (!advice) return toast('Ask for suggestions first', true);
+  const failed = [];
+  for (const s of advice.settings.filter(s => !s.same && s.writable)) {
+    try { await api('/api/prop', { code: s.code, value: s.value }); s.same = true; s.current = s.display; }
+    catch (e) { failed.push(`${s.label}: ${e.message}`); }
+  }
+  renderAdvice();
+  toast(failed.length ? failed.join(' · ') : 'Settings applied', failed.length > 0);
+}
+
+$('advBtn').onclick = suggestSettings;
+$('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} };
+api('/api/advisor').then(c => {
+  for (const m of c.models) $('advModel').add(new Option(m.label, m.id));
+  try { if (c.models.some(m => m.id === localStorage.advModel)) $('advModel').value = localStorage.advModel; } catch {}
+  if (c.provider) return;
+  $('advModel').disabled = true;
+  $('advBtn').disabled = true;
+  $('advHint').textContent = 'Add OPENROUTER_API_KEY=… to a .env file next to package.json and restart to enable this.';
+}).catch(() => {});
+
 // ---------- phone remote ----------
 let qrLib;
-async function showPhoneDialog() {
-  const { urls } = await api('/api/remote');
-  const list = $('qrList');
-  list.innerHTML = '';
-  if (!urls.length) list.textContent = 'No Wi-Fi/Ethernet network found on this laptop.';
+async function loadQrLib() {
   qrLib ??= await new Promise((resolve, reject) => {
     const sc = document.createElement('script');
     sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
@@ -347,33 +679,72 @@ async function showPhoneDialog() {
     sc.onerror = () => reject(new Error('Could not load the QR code library (offline?)'));
     document.head.append(sc);
   }).catch(e => { toast(e.message, true); return null; });
-  for (const url of urls) {
-    const item = document.createElement('div');
-    if (qrLib) {
-      const qr = qrLib(0, 'M'); qr.addData(url); qr.make();
-      item.innerHTML = `<div class="qr">${qr.createImgTag(6, 0)}</div>`;
-    }
-    const code = document.createElement('code'); code.textContent = url;
-    item.append(code);
-    list.append(item);
-  }
-  $('phoneDialog').showModal();
 }
+
+function qrItem(url) {
+  const item = document.createElement('div');
+  if (qrLib) {
+    const qr = qrLib(0, 'M'); qr.addData(url); qr.make();
+    item.innerHTML = `<div class="qr">${qr.createImgTag(6, 0)}</div>`;
+  }
+  const code = document.createElement('code'); code.textContent = url;
+  item.append(code);
+  return item;
+}
+
+let tunnelPoll;
+function renderTunnel(t) {
+  const status = $('tunnelStatus');
+  $('tunnelToggle').checked = t.status === 'starting' || t.status === 'on';
+  status.classList.toggle('bad', t.status === 'error');
+  status.textContent =
+    t.status === 'starting' ? 'Starting Cloudflare tunnel…' :
+    t.status === 'error' ? t.error :
+    t.status === 'on' && !t.link ? 'Tunnel connected. Set CF_TUNNEL_URL to your tunnel\'s hostname to get a link here.' :
+    t.status === 'on' ? (t.mode === 'quick' ? 'Live at a temporary address (changes every time). Scan from any network:' : 'Live. Scan from any network:') :
+    'Works from any network, including mobile data, over https — so voice and clap work on the phone too.';
+  $('tunnelQr').replaceChildren(...(t.link ? [qrItem(t.link)] : []));
+  // cloudflared takes a few seconds to connect; check back until it settles.
+  clearTimeout(tunnelPoll);
+  if (t.status === 'starting' && $('phoneDialog').open) {
+    tunnelPoll = setTimeout(() => api('/api/remote').then(r => renderTunnel(r.tunnel)).catch(() => {}), 1000);
+  }
+}
+
+async function showPhoneDialog() {
+  const { lan, urls, tunnel } = await api('/api/remote');
+  await loadQrLib();
+  const list = $('qrList');
+  $('lanSection').classList.toggle('hidden', !lan);
+  list.replaceChildren(...urls.map(qrItem));
+  if (!urls.length) list.textContent = 'No Wi-Fi/Ethernet network found on this laptop.';
+  $('phoneDialog').showModal();
+  renderTunnel(tunnel);
+}
+$('tunnelToggle').onchange = () =>
+  api('/api/tunnel', { on: $('tunnelToggle').checked }).then(renderTunnel).catch(e => toast(e.message, true));
 $('phoneBtn').onclick = () => showPhoneDialog().catch(e => toast(e.message, true));
 $('phoneClose').onclick = () => $('phoneDialog').close();
+$('phoneDialog').addEventListener('close', () => clearTimeout(tunnelPoll));
 // Only the laptop itself may see the access key, so the button only appears there.
-api('/api/remote').then(r => $('phoneBtn').classList.toggle('hidden', !r.lan)).catch(() => {});
+api('/api/remote').then(() => $('phoneBtn').classList.remove('hidden')).catch(() => {});
 
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || e.repeat || $('viewer').open || $('phoneDialog').open) return;
   const k = e.key.toLowerCase();
-  if (k === ' ') { e.preventDefault(); actions.sequence(); }
+  if (k === ' ') { e.preventDefault(); primaryAction(); }
   else if (k === 'f') actions.focus();
   else if (k === 'l') $('lvBtn').click();
   else if (k === 'g') $('gridBtn').click();
   else if (k === 'z') actions.zoom();
   else if (k === 'r') actions.record();
-  else if (k === 'escape') cancel();
+  else if (k === 'a') actions.advise();
+  else if (k === 'm') toggleAdv();
+  else if (k === 'escape') {
+    if (openChip) { openChip = null; renderProps(); }
+    toggleFilm(false);
+    cancel();
+  }
 });
 
 // ---------- triggers ----------
@@ -383,7 +754,21 @@ function triggerToggle(id, badgeId, trigger) {
       try { await trigger.start(); }
       catch (e) { $(id).checked = false; toast(e.message, true); }
     } else trigger.stop();
-    $(badgeId).classList.toggle('hidden', !$(id).checked);
+    const on = $(id).checked;
+    $(badgeId).classList.toggle('hidden', !on);
+    const rail = document.querySelector(`.trig[data-toggle="${id}"]`);
+    rail.classList.toggle('on', on);
+    rail.setAttribute('aria-pressed', on);
+    document.querySelector(`.tcard[data-card="${id}"]`).classList.toggle('on', on);
+  };
+}
+// The rail buttons flip the same checkboxes as the cards in the Triggers tab.
+for (const b of document.querySelectorAll('.trig[data-toggle]')) {
+  b.onclick = () => {
+    const cb = $(b.dataset.toggle);
+    if (cb.disabled) return toggleAdv(true, 'triggers'); // shows why it's unavailable
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
   };
 }
 

@@ -7,78 +7,160 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<div class="app" id="app">
+
 <header class="topbar">
   <div class="brand"><span class="dot" id="connDot"></span><span id="camName">Connecting…</span></div>
-  <div class="badges">
-    <span class="badge" id="modeBadge" title="Exposure mode (set on the camera's dial)">–</span>
-    <span class="badge" id="batteryBadge" title="Battery">–</span>
-    <span class="badge listening hidden" id="voiceBadge">● Listening</span>
-    <span class="badge listening hidden" id="gestureBadge">✋ Gestures</span>
-    <span class="badge listening hidden" id="clapBadge">👏 Clap</span>
-    <span class="badge rec hidden" id="recBadge">● REC 0:00</span>
+  <span class="pill" title="Exposure mode (set on the camera's dial)">Mode <b id="modeBadge">–</b></span>
+  <span class="pill hide-sm" title="Battery"><b id="batteryBadge">–</b></span>
+  <div class="spacer"></div>
+  <div class="bgroup" role="group" aria-label="View">
+    <button class="tbtn" id="gridBtn" title="Rule-of-thirds grid (G)" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg><span class="hide-sm">Grid</span></button>
+    <button class="tbtn" id="zoomBtn" title="Magnify around the focus point (Z)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M11 8.5v5M8.5 11h5"/></svg><span class="mono" id="zoomLabel">1×</span></button>
+    <button class="tbtn" id="lvBtn" title="Toggle live view (L)" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="hide-sm">Live view</span></button>
   </div>
-  <div class="top-actions">
-    <button class="ghost hidden" id="phoneBtn" title="Use your phone as the remote">📱 Phone</button>
-    <button class="ghost" id="zoomBtn" title="Magnify around the focus point (Z)">Zoom 1×</button>
-    <button class="ghost" id="gridBtn" title="Rule-of-thirds grid (G)">Grid</button>
-    <button class="ghost" id="lvBtn" title="Toggle live view (L)">Live view</button>
-    <button class="ghost" id="reconnectBtn">Reconnect</button>
+  <div class="bgroup">
+    <button class="tbtn hidden" id="phoneBtn" title="Use your phone as the remote">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg><span class="hide-sm">Phone</span></button>
+    <button class="tbtn" id="reconnectBtn" title="Reconnect to the camera" aria-label="Reconnect">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
   </div>
 </header>
 
-<main class="layout">
-  <section class="stage" id="stage">
-    <div class="viewport" id="viewport" title="Tap to focus here">
-      <canvas id="lv"></canvas>
-      <div class="grid-overlay hidden" id="grid"></div>
-      <div class="focus-box hidden" id="focusBox"></div>
-      <div class="tap-ring hidden" id="tapRing"></div>
-    </div>
-    <div class="placeholder" id="lvPlaceholder">Live view off</div>
-    <div class="countdown hidden" id="countdown"></div>
-    <div class="flash" id="flash"></div>
-    <div class="gesture-hud hidden" id="gestureHud">
-      <video id="webcam" playsinline muted></video>
-      <div class="gesture-label"><span id="gestureName">–</span><div class="hold"><div id="gestureHold"></div></div></div>
-    </div>
-    <div class="toast hidden" id="toast"></div>
-    <div class="seq-status hidden" id="seqStatus"></div>
-  </section>
+<nav class="rail" aria-label="Capture mode and triggers">
+  <span class="cap">Mode</span>
+  <div class="vseg" id="modeSeg" role="group" aria-label="Capture mode" style="--i: 0">
+    <span class="ind"></span>
+    <button class="on" data-mode="photo" title="Photo (Space shoots)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Photo</button>
+    <button data-mode="video" title="Video (R records from any mode)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>Video</button>
+    <button data-mode="lapse" title="Time-lapse">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>Lapse</button>
+  </div>
+  <span class="cap cap-trig">Triggers</span>
+  <div class="trigs">
+    <button class="trig" data-toggle="voiceToggle" aria-label="Voice commands" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="t">Voice</span></button>
+    <button class="trig" data-toggle="gestureToggle" aria-label="Hand gestures" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v8M14 11V5.5a1.5 1.5 0 0 1 3 0V14c0 4-2.5 7-6 7-2.5 0-4-1.5-5.5-4L4 13.5a1.5 1.5 0 0 1 2.5-1.5L8 14"/></svg><span class="t">Gesture</span></button>
+    <button class="trig" data-toggle="clapToggle" aria-label="Clap to shoot" aria-pressed="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg><span class="t">Clap</span></button>
+  </div>
+</nav>
 
-  <aside class="panel">
-    <section class="card shutter-card">
-      <button id="shutter" class="shutter" title="Shoot (Space)"><span>SHOOT</span></button>
-      <div class="row opts">
-        <label>Delay<select id="delay"><option value="0">Off</option><option value="2">2 s</option><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option></select></label>
-        <label>Shots<select id="count"><option>1</option><option>2</option><option>3</option><option>5</option><option>10</option></select></label>
-        <label>Gap<select id="gap"><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option><option value="5">5 s</option></select></label>
-      </div>
-      <div class="row">
-        <label class="check"><input type="checkbox" id="afBefore" checked> Autofocus before shot</label>
-        <label class="check"><input type="checkbox" id="beeps" checked> Beeps</label>
-      </div>
-      <div class="row">
-        <button id="afBtn" class="secondary">Focus (F)</button>
-        <button id="cancelBtn" class="secondary">Cancel (Esc)</button>
-      </div>
-      <div class="row">
-        <button id="recBtn" class="record"><span class="rec-dot"></span><span id="recLabel">Record video (R)</span></button>
-      </div>
-      <p class="hint">Tap the live view to focus there.</p>
-    </section>
+<main class="stage" id="stage">
+  <div class="viewport" id="viewport" title="Tap to focus here">
+    <canvas id="lv"></canvas>
+    <div class="grid-overlay" id="grid"></div>
+    <div class="focus-box hidden" id="focusBox"></div>
+    <div class="tap-ring hidden" id="tapRing"></div>
+  </div>
+  <div class="placeholder" id="lvPlaceholder">Live view off</div>
+  <div class="countdown hidden" id="countdown"></div>
+  <div class="flash" id="flash"></div>
+  <div class="hud">
+    <span class="hpill rec hidden" id="recBadge">REC 0:00</span>
+    <span class="hpill hidden" id="seqStatus"></span>
+    <div class="spacer"></div>
+    <span class="hpill lis hidden" id="voiceBadge">● Listening</span>
+    <span class="hpill lis hidden" id="gestureBadge">Gestures</span>
+    <span class="hpill lis hidden" id="clapBadge">Clap armed</span>
+  </div>
+  <div class="gesture-hud hidden" id="gestureHud">
+    <video id="webcam" playsinline muted></video>
+    <div class="gesture-label"><span id="gestureName">–</span><div class="hold"><div id="gestureHold"></div></div></div>
+  </div>
+  <div class="toast hidden" id="toast"></div>
+  <div class="film" id="film">
+    <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span></div>
+    <div class="strip" id="strip"></div>
+  </div>
+</main>
 
-    <section class="card">
-      <h2>Exposure</h2>
-      <div class="exposure" id="exposure"></div>
+<aside class="side" id="side" aria-label="Shoot">
+  <div class="compact">
+    <button id="shutter" class="shutter photo" title="Shoot (Space)" aria-label="Shoot"><span class="core"></span></button>
+    <div class="slabel" id="shutterLabel">Shoot</div>
+    <button id="afBtn" class="sq" title="Autofocus (F)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><circle cx="12" cy="12" r="2"/></svg>Focus</button>
+    <button id="cancelBtn" class="sq cancel hidden" title="Cancel (Esc)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>Cancel</button>
+    <span class="cap cap-drive">Drive</span>
+    <div class="vseg" id="driveSeg" role="group" aria-label="Drive mode" style="--i: 0">
+      <span class="ind"></span>
+      <button class="on" data-drive="single" title="One shot">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="12" height="14" rx="2"/></svg>Single</button>
+      <button data-drive="burst" title="Burst — tap again to change the count">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="7" width="11" height="13" rx="2"/><path d="M5 16V6a2 2 0 0 1 2-2h8"/></svg><span class="sub mono" id="burstSub">×3</span></button>
+      <button data-drive="timer" title="Self-timer — tap again to change the delay">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M10 2.5h4"/></svg><span class="sub mono" id="timerSub">3s</span></button>
+    </div>
+    <button id="advToggle" class="sq adv-btn" title="Advanced controls (M)" aria-expanded="false" aria-controls="adv">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg>More</button>
+    <div class="stack" id="stack">
+      <span class="count mono" id="shotCount">0</span>
+      <button class="s2" tabindex="-1" aria-hidden="true"></button>
+      <button class="s1" tabindex="-1" aria-hidden="true"></button>
+      <button class="s0" id="stackBtn" aria-label="Show shots" aria-expanded="false"></button>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <section class="adv" id="adv" aria-label="Advanced controls" inert>
+    <div class="adv-head">
+      <b>Advanced</b>
+      <button class="close" id="advClose" aria-label="Close advanced controls">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+    </div>
+    <div class="tabs" id="tabs" role="tablist" style="--i: 0">
+      <button class="on" role="tab" data-tab="capture">Capture</button>
+      <button role="tab" data-tab="exposure">Exposure</button>
+      <button role="tab" data-tab="triggers">Triggers</button>
+      <button role="tab" data-tab="advisor">Advisor</button>
+      <span class="bar"></span>
+    </div>
+
+    <div class="pane" data-pane="capture">
+      <span class="pcap">Burst count</span>
+      <div class="seg" data-opt="burst" style="--n: 4"><span class="ind"></span>
+        <button data-v="2">×2</button><button data-v="3">×3</button><button data-v="5">×5</button><button data-v="10">×10</button></div>
+      <span class="pcap">Gap between shots</span>
+      <div class="seg" data-opt="gap" style="--n: 4"><span class="ind"></span>
+        <button data-v="0.5">0.5 s</button><button data-v="1">1 s</button><button data-v="2">2 s</button><button data-v="5">5 s</button></div>
+      <span class="pcap">Self-timer</span>
+      <div class="seg" data-opt="timer" style="--n: 4"><span class="ind"></span>
+        <button data-v="2">2 s</button><button data-v="3">3 s</button><button data-v="5">5 s</button><button data-v="10">10 s</button></div>
+      <label class="opt">Burst after the timer<input type="checkbox" id="timerBurst"><span class="sw"></span></label>
+      <span class="pcap">Time-lapse every</span>
+      <div class="seg" data-opt="tlEvery" style="--n: 6"><span class="ind"></span>
+        <button data-v="2">2s</button><button data-v="5">5s</button><button data-v="10">10s</button><button data-v="30">30s</button><button data-v="60">1m</button><button data-v="300">5m</button></div>
+      <span class="pcap">Time-lapse frames</span>
+      <div class="seg" data-opt="tlFrames" style="--n: 5"><span class="ind"></span>
+        <button data-v="10">10</button><button data-v="30">30</button><button data-v="100">100</button><button data-v="300">300</button><button data-v="0">∞</button></div>
+      <div>
+        <label class="opt">Autofocus before shot<input type="checkbox" id="afBefore" checked><span class="sw"></span></label>
+        <label class="opt">Beeps<input type="checkbox" id="beeps" checked><span class="sw"></span></label>
+      </div>
+    </div>
+
+    <div class="pane hidden" data-pane="exposure">
+      <div class="tiles" id="exposure"></div>
       <p class="hint" id="modeHint"></p>
-    </section>
+    </div>
 
-    <section class="card">
-      <h2>Triggers</h2>
+    <div class="pane hidden" data-pane="triggers">
       <p class="hint hidden" id="secureHint">Voice, clap and webcam gestures need the microphone/camera, which phones only allow over https. Use them on the laptop — gestures watching the Nikon's live view still work here.</p>
-      <div class="trigger">
-        <label class="switch"><input type="checkbox" id="voiceToggle"><span></span> Voice commands</label>
-        <details><summary>What can I say?</summary>
+      <div class="tcard" data-card="voiceToggle">
+        <label class="thead">
+          <span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+          <span class="tx"><b>Voice commands</b><span>Say a command to shoot</span></span>
+          <input type="checkbox" id="voiceToggle"><span class="sw"></span>
+        </label>
+        <div class="tbody">
           <ul class="cmds">
             <li><b>“shoot”</b>, “capture”, “cheese”, “take a picture”</li>
             <li><b>“timer five”</b> / “in ten seconds”</li>
@@ -87,50 +169,84 @@
             <li><b>“brighter”</b> / “darker” (exposure comp)</li>
             <li><b>“ISO up”</b> / “ISO down” / “ISO 800”</li>
             <li><b>“start recording”</b> / “action” · <b>“stop recording”</b> / “cut”</li>
+            <li><b>“suggest settings”</b> · <b>“apply settings”</b></li>
             <li><b>“zoom in”</b> / “zoom out”</li>
             <li><b>“live view on/off”</b>, “start/stop time-lapse”</li>
             <li><b>“stop”</b> / “cancel”</li>
           </ul>
-        </details>
-        <div class="heard" id="heard"></div>
-      </div>
-      <div class="trigger">
-        <label class="switch"><input type="checkbox" id="gestureToggle"><span></span> Hand gestures</label>
-        <div class="row opts">
-          <label>Watch<select id="gestureSource"><option value="liveview">Nikon live view</option><option value="webcam">Laptop webcam</option></select></label>
+          <div class="heard" id="heard"></div>
         </div>
-        <div class="gesture-map" id="gestureMap"></div>
       </div>
-      <div class="trigger">
-        <label class="switch"><input type="checkbox" id="clapToggle"><span></span> Clap to shoot</label>
-        <div class="row opts">
-          <label>Sensitivity<input type="range" id="clapSens" min="1" max="10" value="5"></label>
+      <div class="tcard" data-card="gestureToggle">
+        <label class="thead">
+          <span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v8M14 11V5.5a1.5 1.5 0 0 1 3 0V14c0 4-2.5 7-6 7-2.5 0-4-1.5-5.5-4L4 13.5a1.5 1.5 0 0 1 2.5-1.5L8 14"/></svg></span>
+          <span class="tx"><b>Hand gestures</b><span>Hold a pose to trigger</span></span>
+          <input type="checkbox" id="gestureToggle"><span class="sw"></span>
+        </label>
+        <div class="tbody">
+          <label class="field">Watch<select id="gestureSource"><option value="liveview">Nikon live view</option><option value="webcam">Laptop webcam</option></select></label>
+          <div class="gesture-map" id="gestureMap"></div>
+        </div>
+      </div>
+      <div class="tcard" data-card="clapToggle">
+        <label class="thead">
+          <span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l3-7 4 14 3-7h5"/></svg></span>
+          <span class="tx"><b>Clap to shoot</b><span>Listens for a sharp clap</span></span>
+          <input type="checkbox" id="clapToggle"><span class="sw"></span>
+        </label>
+        <div class="tbody">
+          <label class="field range">Sensitivity<input type="range" id="clapSens" min="1" max="10" value="5"></label>
           <div class="meter"><div id="clapMeter"></div></div>
         </div>
       </div>
-    </section>
+    </div>
 
-    <section class="card">
-      <h2>Time-lapse</h2>
-      <div class="row opts">
-        <label>Every<select id="tlEvery"><option value="2">2 s</option><option value="5" selected>5 s</option><option value="10">10 s</option><option value="30">30 s</option><option value="60">1 min</option><option value="300">5 min</option></select></label>
-        <label>Frames<select id="tlFrames"><option value="10">10</option><option value="30" selected>30</option><option value="100">100</option><option value="300">300</option><option value="0">∞</option></select></label>
-      </div>
-      <button id="tlBtn" class="secondary wide">Start time-lapse</button>
-    </section>
-  </aside>
-</main>
+    <div class="pane hidden" data-pane="advisor">
+      <label class="field">Shooting<select id="advScene">
+        <option value="boudoir">Low-light boudoir</option>
+        <option value="portrait">Outdoor portrait</option>
+        <option value="landscape">Landscape</option>
+        <option value="action">Action / sports</option>
+        <option value="street">Street</option>
+        <option value="event">Indoor event</option>
+        <option value="night">Night / astro</option>
+        <option value="product">Product</option>
+      </select></label>
+      <label class="field">Model<select id="advModel"></select></label>
+      <input id="advNotes" class="adv-notes" placeholder="Notes (optional): e.g. handheld, want a moody look" maxlength="500">
+      <button id="advBtn" class="secondary wide">Suggest settings (A)</button>
+      <div id="advResult" class="adv-result hidden"></div>
+      <p class="hint" id="advHint">Sends the live view frame to an AI model, which suggests settings for this scene.</p>
+    </div>
+  </section>
+</aside>
 
-<footer class="gallery">
-  <div class="gallery-head"><h2>Shots</h2><span class="hint" id="galleryHint">Photos are copied to the captures folder as they're taken</span></div>
-  <div class="strip" id="strip"></div>
+<footer class="bottom">
+  <div class="ruler hidden" id="ruler">
+    <button class="step" id="rulerDown" aria-label="Previous value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <div class="rwin"><div class="rtrack" id="rtrack"></div><div class="rcenter"></div></div>
+    <button class="step" id="rulerUp" aria-label="Next value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+  </div>
+  <div class="chips" id="chips" role="group" aria-label="Exposure"></div>
+  <button class="step" id="expoMore" title="All exposure settings" aria-label="All exposure settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
 </footer>
+
+</div>
 
 <dialog id="phoneDialog" class="phone-dialog">
   <h2>Use your phone as the remote</h2>
-  <p>Connect your phone to the <b>same Wi-Fi</b> as this laptop, then scan:</p>
-  <div id="qrList"></div>
-  <p class="hint">The code includes a private access key — anyone who scans it can control the camera, so don't share it. If the page won't load on the phone, Windows Firewall may be blocking Node: allow it on <b>Private</b> networks.</p>
+  <div id="lanSection">
+    <p>Connect your phone to the <b>same Wi-Fi</b> as this laptop, then scan:</p>
+    <div id="qrList" class="qr-list"></div>
+    <p class="hint">If the page won't load on the phone, Windows Firewall may be blocking Node: allow it on <b>Private</b> networks.</p>
+  </div>
+  <div class="tunnel-section">
+    <label class="switch"><input type="checkbox" id="tunnelToggle"><span></span> Share over the internet (Cloudflare)</label>
+    <p class="hint" id="tunnelStatus">Works from any network, including mobile data, over https — so voice and clap work on the phone too.</p>
+    <div id="tunnelQr" class="qr-list"></div>
+  </div>
+  <p class="hint">Each code includes a private access key — anyone who scans it can control the camera, so don't share it.</p>
   <div class="viewer-bar"><span></span><button id="phoneClose" class="ghost">Close</button></div>
 </dialog>
 
