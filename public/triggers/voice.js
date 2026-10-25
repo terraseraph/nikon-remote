@@ -7,6 +7,16 @@ const N = '(\\d+|' + Object.keys(NUMBERS).join('|') + ')';
 
 // Ordered: first match wins. Each returns [label, (actions) => void].
 const COMMANDS = [
+  // Reference photos come first: requests are free text ("inspo for a couple shoot by the beach")
+  // and would otherwise trip the shoot, stop and timer commands below.
+  [/\b(?:inspo|inspiration|insp?o|pose ideas?|posing ideas?|reference(?: photos?| shots?)?)(?: (?:for|of|with|like|on|showing))? (.{3,})$/, m => [`Inspo: ${m[1]}`, a => a.inspo(m[1])]],
+  [/^show me (?:some )?(.{3,})$/, m => [`Inspo: ${m[1]}`, a => a.inspo(m[1])]],
+  [/^(?:next|another)(?: one| photo| pic| picture| idea| pose| image| reference)?$/, () => ['Next reference', a => a.inspoStep(1)]],
+  [/^(?:previous|go back|back)(?: one| photo| pic| picture| idea| pose| image| reference)?$/, () => ['Previous reference', a => a.inspoStep(-1)]],
+  [/\b(?:unpin|stop matching|clear (?:the )?pose)\b/, () => ['Unpin pose', a => a.unpinPose()]],
+  [/\b(?:pin|match) (?:this|that|it)(?: one| pose| photo)?\b|^pin( it)?$|\bmatch (?:the )?pose\b/, () => ['Match pose', a => a.pinPose()]],
+  [/\b(?:close|hide) (?:the )?(?:inspo|inspiration|references?)\b/, () => ['Close references', a => a.closeInspo()]],
+  [/^(?:make it )?(bigger|smaller)$/, m => [m[1] === 'bigger' ? 'Bigger reference' : 'Smaller reference', a => a.inspoSize(m[1] === 'bigger')]],
   [/\b(start|begin) (a |the )?time ?lapse\b/, () => ['Start time-lapse', a => a.timelapse(true)]],
   [/\b(stop|end) (the )?time ?lapse\b/, () => ['Stop time-lapse', a => a.timelapse(false)]],
   // "pre-set" arrives as "pre set" once dashes are stripped.
@@ -52,6 +62,9 @@ export const VOICE_HELP = [
   { say: 'zoom in', also: ['zoom out'], does: 'Magnify live view' },
   { say: 'live view on', also: ['live view off'], does: 'Live view' },
   { say: 'suggest settings', also: ['apply settings'], does: 'Shot advisor' },
+  { say: 'inspo couple by a window', also: ['show me moody portrait poses'], does: 'Reference photos', key: true },
+  { say: 'next', also: ['previous', 'bigger', 'close inspo'], does: 'Browse references' },
+  { say: 'match pose', also: ['pin that', 'unpin'], does: 'Pose outline + score' },
   { say: 'cancel', also: ['stop'], does: 'Stop what’s running', key: true },
 ];
 

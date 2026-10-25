@@ -3,6 +3,8 @@ import { VoiceTrigger, VOICE_HELP } from './triggers/voice.js';
 import { GestureTrigger, GESTURES } from './triggers/gestures.js';
 import { ClapTrigger } from './triggers/clap.js';
 import { LiveView } from './liveview.js';
+import { Inspo } from './inspo.js';
+import { PoseMatch } from './pose.js';
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -428,6 +430,12 @@ export const actions = {
   timelapse: on => (on ? startTimelapse() : stopTimelapse()),
   advise: () => suggestSettings(),
   applyAdvice: () => applyAdvice(),
+  inspo: text => inspo.find(text),
+  inspoStep: d => (inspo.photos.length ? (inspo.open(), inspo.step(d)) : toast('Say “inspo” and what you’re after first', true)),
+  inspoSize: big => inspo.size(big),
+  pinPose: () => inspo.pin(),
+  unpinPose: () => inspo.unpin(),
+  closeInspo: () => inspo.close(),
 };
 
 // ---------- rendering ----------
@@ -1136,6 +1144,8 @@ document.addEventListener('keydown', e => {
   else if (k === 'z') actions.zoom();
   else if (k === 'r') actions.record();
   else if (k === 'a') actions.advise();
+  else if (k === 'i') { e.preventDefault(); inspo.toggle(); }
+  else if ((k === '[' || k === ']') && inspo.isOpen) inspo.step(k === ']' ? 1 : -1);
   else if (k === 'm') toggleAdv();
   else if (k === 'escape') {
     if (openChip) { openChip = null; renderProps(); }
@@ -1144,6 +1154,21 @@ document.addEventListener('keydown', e => {
     cancel();
   }
 });
+
+// ---------- inspo + pose match ----------
+const pose = new PoseMatch({
+  liveView,
+  overlay: $('poseOverlay'),
+  onUpdate: ({ score, hint }) => {
+    const pct = score == null ? null : Math.round(score * 100);
+    $('poseScore').textContent = pct == null ? '–' : `${pct}%`;
+    $('poseHint').textContent = hint;
+    $('poseHud').classList.toggle('good', pct >= 85);
+    $('poseHud').classList.toggle('close', pct >= 65 && pct < 85);
+  },
+});
+const inspo = new Inspo({ api, pose, toast, getModel: () => $('advModel').value });
+$('inspoBtn').onclick = () => inspo.toggle();
 
 // ---------- triggers ----------
 function triggerToggle(id, badgeId, trigger) {

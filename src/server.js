@@ -12,6 +12,7 @@ import { Camera } from './camera.js';
 import { Tunnel } from './tunnel.js';
 import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
+import { findInspo, inspoConfig, proxyImage } from './inspo.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -181,6 +182,8 @@ const routes = {
   'POST /api/prop/step': b => camera.stepProp(+b.code, +b.delta).then(() => camera.props[+b.code]),
   'GET /api/advisor': () => ({ ...advisorConfig(), scenes: Object.keys(SCENES) }),
   'POST /api/advise': b => advise(camera, { scene: b.scene, notes: String(b.notes || '').slice(0, 500), model: b.model }),
+  'GET /api/inspo': () => inspoConfig(),
+  'POST /api/inspo': b => findInspo(camera, { request: b.request, model: b.model }),
   'POST /api/reconnect': () => camera.reconnect().then(() => camera.state()),
   'GET /api/presets': () => loadPresets(),
   'POST /api/presets': b => savePresets(b.presets),
@@ -229,6 +232,13 @@ const server = createServer(async (req, res) => {
       ...(f.af && { 'X-AF': `${f.af.x},${f.af.y},${f.af.w},${f.af.h}` }),
     });
     return res.end(out);
+  }
+  if (path === '/api/inspo/img') {
+    try {
+      const img = await proxyImage(url.searchParams.get('u'));
+      res.writeHead(200, { 'Content-Type': img.type, 'Content-Length': img.data.length, 'Cache-Control': 'private, max-age=3600' });
+      return res.end(img.data);
+    } catch (e) { return json(res, 404, { error: e.message }); }
   }
   if (path.startsWith('/captures/.thumbs/')) return serveFile(req, res, THUMBS, path.slice('/captures/.thumbs/'.length));
   if (path.startsWith('/captures/')) return serveFile(req, res, CAPTURES, path.slice('/captures/'.length));
