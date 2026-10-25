@@ -201,12 +201,18 @@ export class Camera extends EventEmitter {
     if (this.recordingSince) return;
     if (!this.liveView) await this.startLiveView();
     let { code } = await this.bridge.send(Op.NikonStartMovieRecInCard);
-    if (code === INVALID_STATUS) {
-      const selector = await this.bridge.send(Op.GetDevicePropValue, [NikonProp.LiveViewSelector], { dir: 'read' });
-      if (selector.code === OK && selector.data[0] === 0) throw new Error('Flip the camera\'s photo/video switch to video to record');
-      if (await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'record video')) ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
+    if (code === INVALID_STATUS && await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'record video')) {
+      ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
     }
-    if (code === INVALID_STATUS) throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
+    if (code === INVALID_STATUS) {
+      // Only blame the switch once application mode has been tried: the selector property
+      // isn't a dependable mirror of the physical switch on every body.
+      const read = async p => { const r = await this.bridge.send(Op.GetDevicePropValue, [p], { dir: 'read' }); return r.code === OK ? r.data.readUIntLE(0, Math.min(4, r.data.length)) : null; };
+      const selector = await read(NikonProp.LiveViewSelector), blocked = await read(NikonProp.MovieRecProhibitCondition);
+      this.emit('log', `Record refused: selector=${selector} prohibit=0x${(blocked ?? 0).toString(16)}`);
+      if (selector === 0) throw new Error('Flip the camera\'s photo/video switch to video to record');
+      throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
+    }
     if (code !== OK) throw new Error('Record: ' + respName(code));
     this.recordingSince = Date.now();
     this.emitState();

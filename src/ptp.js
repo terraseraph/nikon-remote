@@ -33,6 +33,7 @@ export const Op = {
 export const NikonProp = {
   LiveViewImageSize: 0xd1ac, // 1 QVGA, 2 VGA, 3 XGA
   LiveViewSelector: 0xd1a6,  // photo/video switch: 0 photo, 1 movie
+  MovieRecProhibitCondition: 0xd0a4, // bitfield of reasons recording is refused (0 = allowed)
 };
 
 // Nikon Z live view frames start with a big-endian header; the JPEG follows it.
