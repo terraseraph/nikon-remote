@@ -54,7 +54,7 @@ export class Camera extends EventEmitter {
 
   setDisconnected(error) {
     if (!this.connected && this.error === error) return;
-    this.connected = false; this.liveView = false; this.recordingSince = null; this.error = error;
+    this.connected = false; this.liveView = false; this.recordingSince = null; this.pcMode = this.appMode = false; this.error = error;
     this.emitState();
   }
 
@@ -103,7 +103,9 @@ export class Camera extends EventEmitter {
         await sleep(this.liveView ? 30 : 150);
       } catch (e) {
         this.emit('log', `loop: ${e.message}`);
-        if (/bridge exited|not connected|0x8007/i.test(e.message)) this.setDisconnected(e.message);
+        // Any Windows device error (e.g. 0x802A0002 after the camera is power-cycled) means the
+        // handle is dead: drop it so the retry above restarts the bridge with a fresh connection.
+        if (/bridge exited|not connected|HRESULT/i.test(e.message)) this.setDisconnected('Camera connection lost — reconnecting…');
         await sleep(500);
       }
     }
@@ -120,8 +122,25 @@ export class Camera extends EventEmitter {
     return code;
   }
 
+  // Nikon Z bodies gate some operations behind host-control modes, switched on demand:
+  //  - PC camera mode (ChangeCameraMode 1): live view can refuse to start without it.
+  //  - application mode (ChangeApplicationMode 1): needed before movie recording.
+  // Stills work without either. Both reset when the camera is power-cycled.
+  // Returns true if the mode was switched, so the caller can retry.
+  async enterMode(flag, op, reason) {
+    if (this[flag] || !this.info?.operations.includes(op)) return false;
+    this.emit('log', `Switching camera to ${flag === 'pcMode' ? 'PC control' : 'application'} mode to ${reason}`);
+    const { code } = await this.bridge.send(op, [1]);
+    await this.waitReady();
+    this[flag] = code === OK;
+    return this[flag];
+  }
+
   async startLiveView() {
-    const { code } = await this.bridge.send(Op.NikonStartLiveView);
+    let { code } = await this.bridge.send(Op.NikonStartLiveView);
+    if (code === INVALID_STATUS && await this.enterMode('pcMode', Op.NikonChangeCameraMode, 'start live view')) {
+      ({ code } = await this.bridge.send(Op.NikonStartLiveView));
+    }
     if (code !== OK && !BUSY.has(code)) { this.emit('log', `Live view: ${respName(code)}`); this.wantLiveView = false; return this.emitState(); }
     await this.waitReady();
     // Prefer the largest live view frames (1024px on the Z50II); older bodies may not support it.
@@ -185,14 +204,7 @@ export class Camera extends EventEmitter {
     if (code === INVALID_STATUS) {
       const selector = await this.bridge.send(Op.GetDevicePropValue, [NikonProp.LiveViewSelector], { dir: 'read' });
       if (selector.code === OK && selector.data[0] === 0) throw new Error('Flip the camera\'s photo/video switch to video to record');
-      // Z bodies only accept movie recording once a host app has taken "application mode"
-      // (stills work without it). Switch on demand and retry.
-      if (this.info?.operations.includes(Op.NikonChangeApplicationMode)) {
-        this.emit('log', 'Switching camera to application mode so it will record video');
-        await this.bridge.send(Op.NikonChangeApplicationMode, [1]);
-        await this.waitReady();
-        ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
-      }
+      if (await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'record video')) ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
     }
     if (code === INVALID_STATUS) throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
     if (code !== OK) throw new Error('Record: ' + respName(code));

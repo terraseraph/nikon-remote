@@ -15,6 +15,7 @@ export const Op = {
   SetDevicePropValue: 0x1016,
   // Nikon
   NikonInitiateCaptureRecInSdram: 0x90c0,
+  NikonChangeCameraMode: 0x90c2,
   NikonAfDrive: 0x90c1,
   NikonCheckEvent: 0x90c7,
   NikonDeviceReady: 0x90c8,
