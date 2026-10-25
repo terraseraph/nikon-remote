@@ -181,8 +181,19 @@ export class Camera extends EventEmitter {
     if (!this.connected) throw new Error('Camera not connected');
     if (this.recordingSince) return;
     if (!this.liveView) await this.startLiveView();
-    const { code } = await this.bridge.send(Op.NikonStartMovieRecInCard);
-    if (code === INVALID_STATUS) throw new Error('Camera refused to record: flip the photo/video switch to video');
+    let { code } = await this.bridge.send(Op.NikonStartMovieRecInCard);
+    if (code === INVALID_STATUS) {
+      const selector = await this.bridge.send(Op.GetDevicePropValue, [NikonProp.LiveViewSelector], { dir: 'read' });
+      if (selector.code === OK && selector.data[0] === 0) throw new Error('Flip the camera\'s photo/video switch to video to record');
+      // Z bodies only accept movie recording once a host app has taken "application mode"
+      // (stills work without it). Switch on demand and retry.
+      if (this.info?.operations.includes(Op.NikonChangeApplicationMode)) {
+        await this.bridge.send(Op.NikonChangeApplicationMode, [1]);
+        await this.waitReady();
+        ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
+      }
+    }
+    if (code === INVALID_STATUS) throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
     if (code !== OK) throw new Error('Record: ' + respName(code));
     this.recordingSince = Date.now();
     this.emitState();

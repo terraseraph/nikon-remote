@@ -26,9 +26,13 @@ export const Op = {
   NikonChangeAfArea: 0x9205,
   NikonStartMovieRecInCard: 0x920a,
   NikonEndMovieRec: 0x920b,
+  NikonChangeApplicationMode: 0x9435,
 };
 
-export const NikonProp = { LiveViewImageSize: 0xd1ac }; // 1 QVGA, 2 VGA, 3 XGA
+export const NikonProp = {
+  LiveViewImageSize: 0xd1ac, // 1 QVGA, 2 VGA, 3 XGA
+  LiveViewSelector: 0xd1a6,  // photo/video switch: 0 photo, 1 movie
+};
 
 // Nikon Z live view frames start with a big-endian header; the JPEG follows it.
 // Coordinates are in sensor pixels (e.g. 5568×3712 on the Z50II).
