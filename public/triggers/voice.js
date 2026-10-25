@@ -73,12 +73,18 @@ export class VoiceTrigger {
     this.rec = new SR();
     this.rec.continuous = true;
     this.rec.interimResults = false;
+    // Quiet speech often lands the right words in a lower-ranked guess ("should" over "shoot").
+    this.rec.maxAlternatives = 5;
     this.rec.lang = navigator.language || 'en-AU';
     this.rec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (!e.results[i].isFinal) continue;
-        const text = e.results[i][0].transcript.trim();
-        const cmd = parseCommand(text);
+        const guesses = Array.from(e.results[i], alt => alt.transcript.trim());
+        let text = guesses[0], cmd = null;
+        for (const g of guesses) {
+          cmd = parseCommand(g);
+          if (cmd) { text = g; break; }
+        }
         this.onHeard(text, cmd?.[0]);
         cmd?.[1](this.actions);
       }

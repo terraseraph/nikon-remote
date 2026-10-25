@@ -12,7 +12,9 @@ export class ClapTrigger {
   quiet(ms) { this.quietUntil = Math.max(this.quietUntil, performance.now() + ms); }
 
   async start() {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+    // Auto gain stays on: Chrome can share one capture setup per mic, and turning it off here
+    // also left voice commands with a raw, quiet signal. Noise suppression would eat the claps.
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } })
       .catch(() => { throw new Error('Microphone permission was blocked'); });
     this.ctx = new AudioContext();
     this.analyser = this.ctx.createAnalyser();
