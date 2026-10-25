@@ -1,5 +1,5 @@
 import { fmt, LABEL } from './format.js';
-import { VoiceTrigger } from './triggers/voice.js';
+import { VoiceTrigger, VOICE_HELP } from './triggers/voice.js';
 import { GestureTrigger, GESTURES } from './triggers/gestures.js';
 import { ClapTrigger } from './triggers/clap.js';
 import { LiveView } from './liveview.js';
@@ -431,6 +431,7 @@ function renderStack(fresh) {
 }
 function toggleFilm(open = !$('film').classList.contains('open')) {
   $('film').classList.toggle('open', open);
+  $('stage').classList.toggle('film-open', open);
   $('stackBtn').setAttribute('aria-expanded', open);
 }
 $('stackBtn').onclick = () => toggleFilm();
@@ -760,7 +761,74 @@ function triggerToggle(id, badgeId, trigger) {
     rail.classList.toggle('on', on);
     rail.setAttribute('aria-pressed', on);
     document.querySelector(`.tcard[data-card="${id}"]`).classList.toggle('on', on);
+    renderGuide();
   };
+}
+
+// ---------- hands-free guide: what to say / which gesture does what, over the live view ----------
+function renderVoiceHelp() {
+  $('voiceHelp').replaceChildren(...VOICE_HELP.map(c => {
+    const row = document.createElement('div');
+    row.className = 'cmd';
+    const say = document.createElement('b'), does = document.createElement('em');
+    say.textContent = `“${c.say}”`; does.textContent = c.does;
+    row.append(say, does);
+    if (c.also) {
+      const also = document.createElement('span');
+      also.textContent = `or ${c.also.map(a => `“${a}”`).join(', ')}`;
+      row.append(also);
+    }
+    return row;
+  }));
+  $('guidePhrases').replaceChildren(...VOICE_HELP.filter(c => c.key).map(c => {
+    const p = document.createElement('span');
+    p.className = 'phrase'; p.textContent = `“${c.say}”`; p.title = c.does;
+    return p;
+  }));
+}
+
+function renderGestureGuide() {
+  const legend = gestures.legend();
+  $('guideTiles').replaceChildren(...legend.map(g => {
+    const t = document.createElement('div');
+    t.className = 'gtile'; t.dataset.g = g.gesture; t.title = g.label;
+    t.innerHTML = '<span class="em"></span><span class="act"></span>';
+    t.querySelector('.em').textContent = g.emoji;
+    t.querySelector('.act').textContent = g.action;
+    return t;
+  }));
+  if (!legend.length) $('guideTiles').textContent = 'No gestures are set to do anything. Pick actions under All commands.';
+}
+
+function renderGuide() {
+  const v = $('voiceToggle').checked, g = $('gestureToggle').checked, c = $('clapToggle').checked;
+  $('guide').classList.toggle('hidden', !v && !g && !c);
+  $('guideVoice').classList.toggle('hidden', !v);
+  $('guideGest').classList.toggle('hidden', !g);
+  $('guideClap').classList.toggle('hidden', !c);
+}
+
+function foldGuide(folded) {
+  $('guide').classList.toggle('folded', folded);
+  $('guideFold').setAttribute('aria-expanded', !folded);
+  $('guideFold').setAttribute('aria-label', folded ? 'Show the guide' : 'Hide the guide');
+  try { localStorage.guideFolded = folded ? '1' : ''; } catch {}
+}
+$('guideFold').onclick = () => foldGuide(!$('guide').classList.contains('folded'));
+$('guideAll').onclick = () => toggleAdv(true, 'triggers');
+try { foldGuide(!!localStorage.guideFolded); } catch {}
+
+function showHeard(text, matched) {
+  const el = $('guideHeard');
+  el.replaceChildren();
+  const quote = document.createElement('span');
+  quote.textContent = `“${text}”`;
+  const result = document.createElement('b');
+  result.textContent = matched ? `→ ${matched}` : '→ not a command';
+  el.append(quote, ' ', result);
+  el.classList.toggle('hit', !!matched);
+  el.classList.toggle('miss', !matched);
+  bump(el);
 }
 // The rail buttons flip the same checkboxes as the cards in the Triggers tab.
 for (const b of document.querySelectorAll('.trig[data-toggle]')) {
@@ -774,9 +842,14 @@ for (const b of document.querySelectorAll('.trig[data-toggle]')) {
 
 const voice = new VoiceTrigger({
   actions,
-  onHeard: (text, matched) => { $('heard').textContent = `“${text}”${matched ? ` → ${matched}` : ''}`; if (matched) toast(`🎙 ${matched}`); },
+  onHeard: (text, matched) => {
+    $('heard').textContent = `“${text}”${matched ? ` → ${matched}` : ''}`;
+    showHeard(text, matched);
+    if (matched) toast(`🎙 ${matched}`);
+  },
 });
 triggerToggle('voiceToggle', 'voiceBadge', voice);
+renderVoiceHelp();
 
 const gestures = new GestureTrigger({
   actions,
@@ -784,11 +857,25 @@ const gestures = new GestureTrigger({
   webcam: $('webcam'),
   getSource: () => $('gestureSource').value,
   onUpdate: (name, progress) => {
-    $('gestureName').textContent = name ? `${GESTURES[name]?.emoji || ''} ${GESTURES[name]?.label || name}` : 'No hand';
+    const g = GESTURES[name];
+    const tile = $('guideTiles').querySelector(`[data-g="${name}"]`);
+    $('gestureName').textContent = !name ? 'Looking for a hand…' : !g ? name :
+      `${g.emoji} ${g.label}${tile ? '' : ' — does nothing'}`;
     $('gestureHold').style.width = `${Math.round(progress * 100)}%`;
+    // The tile for the gesture being held lights up and fills as the hold completes.
+    for (const t of $('guideTiles').children) {
+      t.classList.toggle('live', t === tile);
+      t.style.setProperty('--p', t === tile ? progress : 0);
+    }
+    lastGesture = name;
   },
-  onFire: label => toast(`✋ ${label}`),
+  onFire: label => {
+    const tile = $('guideTiles').querySelector(`[data-g="${lastGesture}"]`);
+    if (tile) { tile.classList.remove('fired'); tile.offsetWidth; tile.classList.add('fired'); }
+    toast(`✋ ${label}`);
+  },
 });
+let lastGesture = null;
 triggerToggle('gestureToggle', 'gestureBadge', gestures);
 $('gestureToggle').addEventListener('change', () => {
   $('gestureHud').classList.toggle('hidden', !$('gestureToggle').checked);
@@ -799,10 +886,17 @@ $('gestureSource').onchange = async () => {
   if ($('gestureToggle').checked) { gestures.stop(); await gestures.start().catch(e => toast(e.message, true)); }
 };
 gestures.renderMap($('gestureMap'));
+renderGestureGuide();
+// The map's selects save themselves; the guide just follows along.
+$('gestureMap').addEventListener('change', renderGestureGuide);
 
 const clap = new ClapTrigger({
   onClap: () => { toast('👏 Clap!'); actions.sequence(); },
-  onLevel: l => { $('clapMeter').style.width = `${Math.min(100, l * 100)}%`; },
+  onLevel: l => {
+    const w = `${Math.min(100, l * 100)}%`;
+    $('clapMeter').style.width = w;
+    $('guideClapMeter').style.width = w;
+  },
   getSensitivity: () => +$('clapSens').value,
 });
 triggerToggle('clapToggle', 'clapBadge', clap);

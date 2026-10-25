@@ -90,9 +90,48 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .gesture-hud { position: absolute; top: 56px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
 #webcam { width: 180px; border-radius: 8px; transform: scaleX(-1); display: none; }
 .gesture-hud.webcam #webcam { display: block; }
-.gesture-label { background: #000b; padding: 6px 10px; border-radius: 8px; min-width: 140px; text-align: right; }
 .hold { height: 4px; background: #fff2; border-radius: 2px; margin-top: 4px; overflow: hidden; }
 #gestureHold { height: 100%; width: 0; background: var(--accent); }
+
+/* hands-free guide over the live view */
+.guide { position: absolute; left: 14px; bottom: 14px; width: min(360px, calc(100% - 28px)); max-height: calc(100% - 72px); overflow-y: auto; z-index: 1;
+  border-radius: 16px; background: rgba(12, 12, 15, .8); backdrop-filter: blur(14px); border: 1px solid var(--line); padding: 8px 10px 12px 12px;
+  display: flex; flex-direction: column; gap: 10px; animation: guideIn .45s var(--spring); transition: opacity .3s, transform .45s var(--glide); }
+@keyframes guideIn { from { transform: translateY(14px); opacity: 0; } }
+.stage.film-open .guide { opacity: 0; transform: translateY(14px); pointer-events: none; }
+.guide-head { display: flex; align-items: center; gap: 6px; }
+.guide-head .cap { flex: 1; }
+.gbtn { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--muted); background: rgba(255, 255, 255, .06); transition: color .2s, background .2s; }
+.gbtn:hover { color: var(--fg); background: rgba(255, 255, 255, .1); }
+.gbtn.icon { width: 30px; padding: 0; display: grid; place-items: center; }
+.gbtn svg { width: 16px; height: 16px; transition: transform .45s var(--glide); }
+.guide.folded { width: auto; padding: 6px 6px 6px 12px; overflow: hidden; }
+.guide.folded .guide-body, .guide.folded #guideAll { display: none; }
+.guide.folded .gbtn.icon svg { transform: rotate(180deg); }
+.guide-body { display: flex; flex-direction: column; gap: 12px; }
+.gsec { display: flex; flex-direction: column; gap: 7px; animation: unfold .45s var(--glide); }
+.gtitle { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: blink 1.4s infinite; }
+.phrases { display: flex; flex-wrap: wrap; gap: 5px; }
+.phrase { padding: 4px 9px; border-radius: 999px; background: rgba(245, 196, 0, .12); color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.gheard { font-size: 12.5px; color: var(--muted); min-height: 1.4em; }
+.gheard b { font-weight: 600; }
+.gheard.hit b { color: var(--ok); }
+.gtiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; font-size: 12px; color: var(--muted); }
+.gtile { position: relative; overflow: hidden; border-radius: 10px; background: rgba(255, 255, 255, .06); padding: 7px 4px 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; transition: transform .3s var(--spring), background .3s; }
+.gtile .em { font-size: 22px; line-height: 1.1; }
+.gtile .act { font-size: 10.5px; line-height: 1.2; color: var(--muted); transition: color .3s; }
+.gtile::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--p, 0) * 100%); background: var(--accent); transition: width .1s linear; }
+.gtile.live { background: rgba(245, 196, 0, .16); transform: scale(1.06); }
+.gtile.live .act { color: var(--fg); }
+.gtile.fired { animation: fired .7s var(--ease); }
+@keyframes fired { 0% { background: var(--accent); transform: scale(1.15); } }
+.gstatus { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+.gstatus .hold { flex: 1; margin: 0; }
+#guideClapMeter { height: 100%; width: 0; background: var(--ok); transition: width .05s; }
+/* The guide already shows what's listening; the badges are for when it's folded away. */
+.stage:has(.guide:not(.hidden):not(.folded)) .hpill.lis { display: none; }
+.stage:has(.guide:not(.hidden)) .toast { bottom: auto; top: 54px; }
 
 /* shots drawer: slides up over the bottom of the live view */
 .film { position: absolute; left: 14px; right: 14px; bottom: 14px; padding: 10px 12px 12px; border-radius: 14px; background: rgba(15, 15, 18, .88); backdrop-filter: blur(14px); border: 1px solid var(--line);
@@ -197,11 +236,16 @@ input[type=range] { accent-color: var(--accent); }
 .tcard.on .thead .ic { color: var(--accent-ink); background: var(--accent); }
 .thead .tx { flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .thead .tx span { font-size: 12px; color: var(--muted); }
-.tbody { padding: 0 12px 12px; display: none; flex-direction: column; gap: 10px; }
-.tcard.on .tbody { display: flex; animation: unfold .45s var(--glide); }
+.tbody { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.tcard.on .tbody { animation: unfold .45s var(--glide); }
+.hint.tight { margin: 0; }
 @keyframes unfold { from { opacity: 0; transform: translateY(-8px); } }
-.cmds { margin: 0; padding-left: 16px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
-.cmds b { color: var(--fg); font-weight: 600; }
+.cmd-list { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
+.cmd { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; }
+.cmd b { color: var(--accent); font-weight: 600; }
+.cmd em { font-style: normal; text-align: right; }
+.cmd span { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+.tcard:not(.on) .cmd b { color: var(--fg); }
 .heard { font-size: 12px; color: var(--muted); min-height: 1.4em; font-style: italic; }
 .gesture-map { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 13px; }
 .gesture-map select { padding: 6px 8px; }
@@ -294,6 +338,17 @@ dialog[open] { animation: dlg .35s var(--spring); }
   .tbtn { height: 38px; min-width: 38px; padding: 0 7px; gap: 4px; }
   .stage { grid-area: stage; }
   .gesture-hud { top: 50px; }
+  .guide { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: calc(100% - 52px); padding: 6px 8px 10px 10px; gap: 8px; }
+  .guide.folded { right: auto; }
+  .guide-body { gap: 8px; }
+  .guide .cap { display: block; }
+  #guideGest .gtitle, #guideClap .gtitle { font-size: 11.5px; }
+  .gtile { padding: 5px 4px 6px; }
+  .gheard:empty { display: none; }
+  .phrases, .gtiles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .phrase { flex: none; }
+  .gtiles { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 68px; }
+  .gtile .em { font-size: 19px; }
   #webcam { width: 110px; }
 
   .bottom { grid-area: chips; padding: 6px 8px; gap: 6px; }

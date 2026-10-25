@@ -72,8 +72,31 @@
   </div>
   <div class="gesture-hud hidden" id="gestureHud">
     <video id="webcam" playsinline muted></video>
-    <div class="gesture-label"><span id="gestureName">–</span><div class="hold"><div id="gestureHold"></div></div></div>
   </div>
+  <section class="guide hidden" id="guide" aria-label="Hands-free guide">
+    <div class="guide-head">
+      <span class="cap">Hands-free</span>
+      <button class="gbtn" id="guideAll" title="Every command, and which gesture does what">All commands</button>
+      <button class="gbtn icon" id="guideFold" aria-label="Hide the guide" aria-expanded="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <div class="guide-body">
+      <div class="gsec hidden" id="guideVoice">
+        <div class="gtitle"><span class="live-dot"></span>Say</div>
+        <div class="phrases" id="guidePhrases"></div>
+        <div class="gheard" id="guideHeard">Listening…</div>
+      </div>
+      <div class="gsec hidden" id="guideGest">
+        <div class="gtitle">Hold a gesture for a moment</div>
+        <div class="gtiles" id="guideTiles"></div>
+        <div class="gstatus"><span id="gestureName">Looking for a hand…</span><div class="hold"><div id="gestureHold"></div></div></div>
+      </div>
+      <div class="gsec hidden" id="guideClap">
+        <div class="gtitle">Clap once, sharply</div>
+        <div class="meter"><div id="guideClapMeter"></div></div>
+      </div>
+    </div>
+  </section>
   <div class="toast hidden" id="toast"></div>
   <div class="film" id="film">
     <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span></div>
@@ -161,19 +184,7 @@
           <input type="checkbox" id="voiceToggle"><span class="sw"></span>
         </label>
         <div class="tbody">
-          <ul class="cmds">
-            <li><b>“shoot”</b>, “capture”, “cheese”, “take a picture”</li>
-            <li><b>“timer five”</b> / “in ten seconds”</li>
-            <li><b>“burst three”</b> / “five shots”</li>
-            <li><b>“focus”</b></li>
-            <li><b>“brighter”</b> / “darker” (exposure comp)</li>
-            <li><b>“ISO up”</b> / “ISO down” / “ISO 800”</li>
-            <li><b>“start recording”</b> / “action” · <b>“stop recording”</b> / “cut”</li>
-            <li><b>“suggest settings”</b> · <b>“apply settings”</b></li>
-            <li><b>“zoom in”</b> / “zoom out”</li>
-            <li><b>“live view on/off”</b>, “start/stop time-lapse”</li>
-            <li><b>“stop”</b> / “cancel”</li>
-          </ul>
+          <div class="cmd-list" id="voiceHelp"></div>
           <div class="heard" id="heard"></div>
         </div>
       </div>
@@ -184,6 +195,7 @@
           <input type="checkbox" id="gestureToggle"><span class="sw"></span>
         </label>
         <div class="tbody">
+          <p class="hint tight">Hold one of these up to the camera for under a second. Pick what each one does:</p>
           <label class="field">Watch<select id="gestureSource"><option value="liveview">Nikon live view</option><option value="webcam">Laptop webcam</option></select></label>
           <div class="gesture-map" id="gestureMap"></div>
         </div>

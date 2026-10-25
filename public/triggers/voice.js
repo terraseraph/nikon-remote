@@ -32,6 +32,24 @@ const COMMANDS = [
   [/\b(shoot|capture|snap|cheese|fire|click|take (a |the )?(photo|picture|pic|shot))\b/, () => ['Shoot', a => a.shoot()]],
 ];
 
+// What the on-screen guide and the Triggers tab list. Keep in step with COMMANDS above;
+// `key` ones are the short list shown over the live view.
+export const VOICE_HELP = [
+  { say: 'shoot', also: ['capture', 'cheese', 'take a picture'], does: 'Take a photo', key: true },
+  { say: 'timer five', also: ['in ten seconds'], does: 'Self-timer', key: true },
+  { say: 'burst three', also: ['five shots'], does: 'Several shots', key: true },
+  { say: 'focus', does: 'Autofocus', key: true },
+  { say: 'brighter', also: ['darker'], does: 'Exposure ±', key: true },
+  { say: 'ISO up', also: ['ISO down', 'ISO 800'], does: 'Change ISO' },
+  { say: 'start recording', also: ['action'], does: 'Start video' },
+  { say: 'stop recording', also: ['cut'], does: 'Stop video' },
+  { say: 'start time-lapse', also: ['stop time-lapse'], does: 'Time-lapse' },
+  { say: 'zoom in', also: ['zoom out'], does: 'Magnify live view' },
+  { say: 'live view on', also: ['live view off'], does: 'Live view' },
+  { say: 'suggest settings', also: ['apply settings'], does: 'Shot advisor' },
+  { say: 'cancel', also: ['stop'], does: 'Stop what’s running', key: true },
+];
+
 export function parseCommand(text) {
   const t = text.toLowerCase().replace(/[.,!?]/g, '').replace(/-/g, ' ').trim();
   for (const [re, make] of COMMANDS) {

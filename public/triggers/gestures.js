@@ -64,6 +64,13 @@ export class GestureTrigger {
     }
   }
 
+  // The gestures that currently do something, for the on-screen guide.
+  legend() {
+    return Object.entries(GESTURES)
+      .filter(([g]) => CHOICES[this.map[g]]?.[1])
+      .map(([g, { emoji, label }]) => ({ gesture: g, emoji, label, action: CHOICES[this.map[g]][0] }));
+  }
+
   async load() {
     if (this.recognizer) return;
     this.onUpdate('Loading model…', 0);
