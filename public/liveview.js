@@ -5,8 +5,9 @@
 const STALL_MS = 3000;
 
 export class LiveView {
-  constructor(canvas, { url = '/api/liveview.mjpg', onFrame } = {}) {
+  constructor(canvas, { url = '/api/liveview.mjpg', pull = false, onFrame } = {}) {
     this.onFrame = onFrame; // (liveView) => void, after each painted frame
+    this.pull = pull;       // fetch one frame at a time instead of the pushed stream (slow links)
     this.af = null;         // camera focus box {x, y, w, h} as fractions of the frame
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -40,6 +41,7 @@ export class LiveView {
   }
 
   async connect() {
+    if (this.pull) return this.pullLoop();
     const abort = (this.abort = new AbortController());
     this.lastFrame = performance.now();
     try {
@@ -57,6 +59,34 @@ export class LiveView {
           this.paint(frame.jpeg);
         }
       }
+    } catch {}
+    if (this.running && this.abort === abort) setTimeout(() => this.abort === abort && this.reconnect(), 500);
+  }
+
+  // Asks for the next frame only once the last one is painted. Over a tunnel the pushed stream
+  // queues up in proxy buffers and falls seconds behind; this way every frame shown is current
+  // and the frame rate settles at whatever the connection can carry.
+  // Several requests stay in flight so round trips overlap: over a tunnel each takes ~0.5 s,
+  // mostly latency rather than transfer, so one at a time would cap out around 2 fps.
+  async pullLoop() {
+    const abort = (this.abort = new AbortController());
+    let seq = 0;
+    const worker = async () => {
+      while (this.running && this.abort === abort) {
+        const res = await fetch(`/api/liveview.jpg?after=${seq}`, { signal: abort.signal, cache: 'no-store' });
+        if (res.status === 204) continue; // no new frame yet; the server already waited
+        if (!res.ok) throw new Error(res.statusText);
+        const jpeg = new Uint8Array(await res.arrayBuffer());
+        const s = +res.headers.get('X-Seq');
+        if (s <= seq) continue; // the other request already showed a newer frame
+        seq = s;
+        const af = res.headers.get('X-AF')?.split(',').map(Number);
+        if (af) this.af = { x: af[0], y: af[1], w: af[2], h: af[3] };
+        await this.paint(jpeg);
+      }
+    };
+    try {
+      await Promise.all([worker(), worker(), worker(), worker()]);
     } catch {}
     if (this.running && this.abort === abort) setTimeout(() => this.abort === abort && this.reconnect(), 500);
   }

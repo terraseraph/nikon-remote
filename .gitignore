@@ -1,5 +1,6 @@
 node_modules/
 captures/
+.cache/
 *.log
 .remote-key
 .env

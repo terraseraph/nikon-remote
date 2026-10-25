@@ -1,7 +1,7 @@
 # local_camera_nikon
 
 A browser remote for a USB-connected Nikon camera, built and tested on a **Nikon Z50II**.
-It runs entirely on your own machine with no drivers or installs beyond Node.
+It runs entirely on your own machine with no drivers or installs beyond Node and one small pure-JavaScript package.
 
 - **Live view** in the browser at 1024px, showing the camera's focus box
 - **Tap to focus:** tap anywhere on the live view to move the AF point there and focus
@@ -11,7 +11,7 @@ It runs entirely on your own machine with no drivers or installs beyond Node.
 - **Video recording:** start and stop by button, R key, voice ("action" / "cut") or gesture
 - **Exposure controls:** aperture, shutter, ISO, exposure comp, white balance, metering, quality and size.
   What's writable depends on the mode dial: everything in **M**, partial in P/A/S.
-- **Auto-download:** every shot, including ones taken with the camera's own button, is copied into `captures/YYYY-MM-DD/` and shown in the gallery strip
+- **Auto-download:** every shot, including ones taken with the camera's own button, is copied into `Pictures/Nikon Remote/YYYY-MM-DD/` and shown in the gallery strip
 - **Voice commands:** "shoot", "timer five", "burst three", "focus", "brighter", "ISO 800", "cancel", …
 - **Hand gestures:** watches the Nikon's own live view (or your webcam). ✋ palm = 3 s timer, ✌️ = shoot, 👍 = timer + 3 shots, ✊ = cancel, ☝️ = focus. Each gesture can be remapped in the app.
 - **Clap to shoot**, offline, with a sensitivity slider
@@ -20,7 +20,10 @@ It runs entirely on your own machine with no drivers or installs beyond Node.
 ## Run it
 
 1. Plug the camera in over USB-C and switch it on.
-2. Start the server:
+2. Install once, then start the server:
+   ```bash
+   npm install
+   ```
    ```bash
    npm start
    ```
@@ -37,6 +40,38 @@ Click **📱 Phone** in the app on the laptop and scan the QR code with a phone 
 - The first time, Windows may ask to let Node through the firewall. Allow it on **Private** networks.
 - Phones only allow microphone and camera access over https, so voice, clap and webcam gestures stay on the laptop. Gestures that watch the Nikon's own live view do work on the phone.
 - Run with `LAN=0` to keep the server reachable from the laptop only.
+
+### From anywhere (Cloudflare Tunnel)
+
+To use the phone on mobile data or another network, switch on **Share over the internet** in the 📱 Phone dialog. This starts [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), which gives you a public https address with no bandwidth cap. Because the address is https, voice and clap work on the phone too. You still need to scan the QR code, which carries the access key: visitors without the key are refused, the same as on Wi-Fi.
+
+Install it once:
+
+```bash
+winget install Cloudflare.cloudflared
+```
+
+With nothing else set up, the app starts a **quick tunnel** on a random `trycloudflare.com` address that changes every time. Quick tunnels hold back server-sent events, so when the live event stream stays silent for 5 seconds the app polls `/api/state` every second and `/api/photos` every 3 seconds instead. Cloudflare doesn't guarantee uptime for quick tunnels, and the address changes every time, so scan the new QR code after each start.
+
+Live view over the tunnel works differently from the laptop's stream, so it stays current on a slow home upload:
+
+- The phone **pulls** frames (`/api/liveview.jpg`) with four requests in flight, instead of receiving a pushed stream. A pushed stream piles up in Cloudflare's buffers and falls seconds behind.
+- While anyone is pulling, the camera switches to its **640px** live view. It goes back to 1024px about 3 seconds after they stop.
+- Pulled frames are **re-encoded at JPEG quality 60** with [`jpeg-js`](https://www.npmjs.com/package/jpeg-js), which takes them from about 70 KB to about 21 KB.
+
+On a 4.6 Mbit/s upload this gives about 7–8 fps, up from about 1 fps with full-size pushed frames.
+
+For a stable address, set up a **named tunnel** on a domain in your Cloudflare account:
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create nikon
+cloudflared tunnel route dns nikon camera.example.com
+```
+
+Then start the server with `CF_TUNNEL=nikon` and `CF_TUNNEL_URL=https://camera.example.com`. For a second layer of login, add a Cloudflare Access application for that hostname (Zero Trust → Access → Applications) that only allows your email address.
+
+The tunnel stops when you switch it off or stop the server. The on/off switch and the link are only shown on the laptop.
 
 ### Video
 
@@ -98,12 +133,14 @@ browser  ──HTTP/SSE/MJPEG──▶  src/server.js (Node)  ──stdin/stdout
 | GET | `/api/state` | |
 | GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log` |
 | GET | `/api/liveview.mjpg` | |
+| GET | `/api/liveview.jpg?after=N` | Next frame newer than `N`, re-encoded smaller; `X-Seq` and `X-AF` headers |
 | GET | `/api/photos` | |
 | POST | `/api/shoot` | `{ "af": true }` |
 | POST | `/api/af` | |
 | POST | `/api/focus-point` | `{ "x": 0.3, "y": 0.5, "focus": true }` (fractions of the frame) |
 | POST | `/api/movie` | `{ "on": true }` |
-| GET | `/api/remote` | Phone QR URLs (laptop only) |
+| GET | `/api/remote` | Phone QR URLs and tunnel status (laptop only) |
+| POST | `/api/tunnel` | `{ "on": true }` (laptop only) |
 | POST | `/api/liveview` | `{ "on": true }` |
 | POST | `/api/prop` | `{ "code": 20495, "value": 800 }` |
 | POST | `/api/prop/step` | `{ "code": 20495, "delta": 1 }` |
@@ -111,7 +148,7 @@ browser  ──HTTP/SSE/MJPEG──▶  src/server.js (Node)  ──stdin/stdout
 | POST | `/api/advise` | `{ "scene": "boudoir", "notes": "handheld" }` |
 | POST | `/api/reconnect` | |
 
-Environment variables: `PORT` (default 8765), `CAPTURES_DIR` (default `./captures`) and `LAN` (set to `0` for laptop-only access).
+Environment variables: `PORT` (default 8765), `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection on Windows), `LAN` (set to `0` for laptop-only access), and for the Cloudflare tunnel `CF_TUNNEL` (named tunnel), `CF_TUNNEL_URL` (its public address) and `CLOUDFLARED` (path to the binary if it isn't found automatically).
 
 ## Known limits
 

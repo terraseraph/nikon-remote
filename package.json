@@ -8,5 +8,10 @@
     "start": "node src/server.js",
     "probe": "node scripts/probe.js"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4"
+  }
 }

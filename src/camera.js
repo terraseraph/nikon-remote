@@ -20,10 +20,11 @@ const INVALID_STATUS = 0xa004;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export class Camera extends EventEmitter {
-  constructor({ capturesDir }) {
+  constructor({ capturesDir, thumbsDir = join(capturesDir, '.thumbs') }) {
     super();
     this.capturesDir = capturesDir;
-    this.thumbsDir = join(capturesDir, '.thumbs');
+    this.thumbsDir = thumbsDir;
+    mkdirSync(capturesDir, { recursive: true });
     mkdirSync(this.thumbsDir, { recursive: true });
     this.connected = false;
     this.name = null;
@@ -35,6 +36,10 @@ export class Camera extends EventEmitter {
     this.capturing = false;
     this.recordingSince = null; // ms timestamp while a movie is recording
     this.frame = null;
+    this.frameSeq = 0;         // counts frames, so pulling viewers can ask for the next new one
+    this.lastPull = 0;         // when a viewer last pulled a single frame
+    this.pullWaiters = [];     // pending pulls, released one per new frame
+    this.smallFrames = false;  // 640px instead of 1024px live view, while someone pulls remotely
     this.lvInfo = null;
     this.bridge = new Bridge();
     this.bridge.on('log', m => this.emit('log', m));
@@ -95,9 +100,11 @@ export class Camera extends EventEmitter {
           await sleep(250);
           continue;
         }
-        const streaming = this.wantLiveView && this.viewers.size > 0;
+        const streaming = this.wantLiveView && (this.viewers.size > 0 || Date.now() - this.lastPull < 3000);
         if (streaming && !this.liveView) await this.startLiveView();
         if (!streaming && this.liveView && !this.recordingSince) await this.stopLiveView();
+        const remote = Date.now() - this.lastPull < 3000;
+        if (this.liveView && remote !== this.smallFrames) await this.setFrameSize(remote);
         if (this.liveView && !this.capturing) await this.pumpFrame();
         if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.pollEvents(); }
         await sleep(this.liveView ? 30 : 150);
@@ -138,13 +145,16 @@ export class Camera extends EventEmitter {
 
   async startLiveView() {
     let { code } = await this.bridge.send(Op.NikonStartLiveView);
+    // In photo mode PC control is enough; with the switch on video the Z50II also wants application mode.
     if (code === INVALID_STATUS && await this.enterMode('pcMode', Op.NikonChangeCameraMode, 'start live view')) {
+      ({ code } = await this.bridge.send(Op.NikonStartLiveView));
+    }
+    if (code === INVALID_STATUS && await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'start live view')) {
       ({ code } = await this.bridge.send(Op.NikonStartLiveView));
     }
     if (code !== OK && !BUSY.has(code)) { this.emit('log', `Live view: ${respName(code)}`); this.wantLiveView = false; return this.emitState(); }
     await this.waitReady();
-    // Prefer the largest live view frames (1024px on the Z50II); older bodies may not support it.
-    await this.bridge.send(Op.SetDevicePropValue, [NikonProp.LiveViewImageSize], { dir: 'write', data: encodeValue(2, 3) }).catch(() => {});
+    await this.setFrameSize(Date.now() - this.lastPull < 3000);
     this.liveView = true;
     this.emitState();
   }
@@ -169,7 +179,32 @@ export class Camera extends EventEmitter {
     if (soi >= 32) this.lvInfo = parseLiveViewHeader(res.data);
     this.frame = res.data.subarray(soi);
     this.frameMeta = this.afBox();
+    this.frameSeq++;
     for (const viewer of this.viewers) writeFrame(viewer, this.frame, this.frameMeta);
+    this.pullWaiters[0]?.();
+  }
+
+  // Prefer the largest live view frames (1024px on the Z50II), but drop to 640px while someone
+  // watches over the internet, where frame size sets the frame rate. Older bodies may not support it.
+  async setFrameSize(small) {
+    this.smallFrames = small;
+    await this.bridge.send(Op.SetDevicePropValue, [NikonProp.LiveViewImageSize], { dir: 'write', data: encodeValue(2, small ? 2 : 3) }).catch(() => {});
+  }
+
+  // For viewers on slow links: the newest frame after `after`, waiting briefly for one.
+  // Pulling one frame at a time means frames can never pile up in a buffer between here
+  // and the viewer, which is what makes a pushed MJPEG stream fall seconds behind.
+  async pullFrame(after, timeoutMs = 2000) {
+    this.lastPull = Date.now();
+    if (!this.frame || this.frameSeq <= after) {
+      // One waiter per new frame, so a viewer with two requests in flight gets two different frames.
+      await new Promise(resolve => {
+        const done = () => { clearTimeout(timer); this.pullWaiters = this.pullWaiters.filter(w => w !== done); resolve(); };
+        const timer = setTimeout(done, timeoutMs);
+        this.pullWaiters.push(done);
+      });
+    }
+    return this.frame && this.frameSeq > after ? { jpeg: this.frame, seq: this.frameSeq, af: this.frameMeta } : null;
   }
 
   // Focus box as fractions of the visible live view area, for drawing over the image.
@@ -210,7 +245,9 @@ export class Camera extends EventEmitter {
       const read = async p => { const r = await this.bridge.send(Op.GetDevicePropValue, [p], { dir: 'read' }); return r.code === OK ? r.data.readUIntLE(0, Math.min(4, r.data.length)) : null; };
       const selector = await read(NikonProp.LiveViewSelector), blocked = await read(NikonProp.MovieRecProhibitCondition);
       this.emit('log', `Record refused: selector=${selector} prohibit=0x${(blocked ?? 0).toString(16)}`);
-      if (selector === 0) throw new Error('Flip the camera\'s photo/video switch to video to record');
+      // While the host has control the camera ignores its own lever, so a flip made after
+      // connecting only registers once the camera is switched off and on again.
+      if (selector === 0) throw new Error('Camera is in photo mode. Set the photo/video switch to video, then turn the camera off and on');
       throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
     }
     if (code !== OK) throw new Error('Record: ' + respName(code));

@@ -6,15 +6,20 @@ import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } f
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { Camera } from './camera.js';
+import { Tunnel } from './tunnel.js';
+import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
 // API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file next to package.json.
 if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'));
-const CAPTURES = process.env.CAPTURES_DIR || join(ROOT, 'captures');
+const CAPTURES = normalize(process.env.CAPTURES_DIR || join(picturesDir(), 'Nikon Remote'));
+// Thumbnails stay with the app so they don't show up as photos in the Pictures album.
+const THUMBS = join(ROOT, '.cache', 'thumbs');
 const PORT = +process.env.PORT || 8765;
 const LAN = process.env.LAN !== '0'; // LAN=0 keeps the server reachable from this machine only
 const KEY_FILE = join(ROOT, '.remote-key');
@@ -32,7 +37,19 @@ const KEY = existsSync(KEY_FILE) ? readFileSync(KEY_FILE, 'utf8').trim() : (() =
   return k;
 })();
 
-const camera = new Camera({ capturesDir: CAPTURES });
+// The user's Pictures folder, following Windows' redirection (e.g. to OneDrive) when set.
+function picturesDir() {
+  if (process.platform === 'win32') {
+    try {
+      const out = execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders', '/v', 'My Pictures'], { encoding: 'utf8' });
+      const m = /My Pictures\s+REG_SZ\s+(.+)/.exec(out);
+      if (m) return m[1].trim();
+    } catch {}
+  }
+  return join(homedir(), 'Pictures');
+}
+
+const camera = new Camera({ capturesDir: CAPTURES, thumbsDir: THUMBS });
 const clients = new Set();
 
 function broadcast(type, data) {
@@ -41,6 +58,11 @@ function broadcast(type, data) {
 }
 for (const type of ['state', 'prop', 'photo', 'shot']) camera.on(type, d => broadcast(type, d));
 camera.on('log', m => { console.log(m); broadcast('log', m); });
+// Proxies such as Cloudflare drop connections that stay silent for ~100 s; an SSE comment keeps them open.
+setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25_000).unref();
+
+const tunnel = new Tunnel({ port: PORT });
+tunnel.on('state', t => console.log(`Tunnel: ${t.status}${t.url ? ` ${t.url}` : ''}${t.error ? ` (${t.error})` : ''}`));
 
 const json = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -71,7 +93,9 @@ function serveFile(req, res, base, rel) {
 }
 
 // ---------- access control ----------
-const isLocal = req => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+// cloudflared also connects from 127.0.0.1, so a request carrying proxy headers came from the internet.
+const isLocal = req => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) &&
+  !req.headers['cf-connecting-ip'] && !req.headers['x-forwarded-for'];
 const keyMatches = k => typeof k === 'string' && k.length === KEY.length && timingSafeEqual(Buffer.from(k), Buffer.from(KEY));
 const cookieKey = req => /(?:^|;\s*)nr_key=([^;]+)/.exec(req.headers.cookie || '')?.[1];
 
@@ -85,6 +109,24 @@ function lanUrls() {
     }
   }
   return out;
+}
+
+// Pulled frames go out over the internet, where bytes per frame set the frame rate. The camera's
+// JPEGs are high quality; re-encoding at 60 makes them about a third of the size (~21 KB at
+// 640px) for ~26 ms of CPU. The last result is kept, so each frame is only encoded once.
+let shrunk = { seq: 0, jpeg: null };
+function shrink(f) {
+  if (shrunk.seq !== f.seq) {
+    try { shrunk = { seq: f.seq, jpeg: jpeg.encode(jpeg.decode(f.jpeg, { useTArray: true }), 60).data }; }
+    catch { return f.jpeg; }
+  }
+  return shrunk.jpeg;
+}
+
+// The public link carries the access key too: whoever has it can use the camera.
+function tunnelState() {
+  const t = tunnel.state();
+  return { ...t, link: t.status === 'on' && t.url ? `${t.url}/?key=${KEY}` : '' };
 }
 
 function deny(res) {
@@ -118,7 +160,7 @@ const server = createServer(async (req, res) => {
     if (keyMatches(key)) {
       // Swap the key in the URL for a cookie, so it doesn't linger in the address bar.
       res.writeHead(302, {
-        'Set-Cookie': `nr_key=${KEY}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`,
+        'Set-Cookie': `nr_key=${KEY}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`, // Strict would drop it when the link is opened from another app or site
         Location: path,
       });
       return res.end();
@@ -128,7 +170,12 @@ const server = createServer(async (req, res) => {
 
   if (path === '/api/remote') {
     if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
-    return json(res, 200, { lan: LAN, urls: LAN ? lanUrls() : [] });
+    return json(res, 200, { lan: LAN, urls: LAN ? lanUrls() : [], tunnel: tunnelState() });
+  }
+  if (path === '/api/tunnel' && req.method === 'POST') {
+    if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
+    (await body(req)).on ? tunnel.start() : tunnel.stop();
+    return json(res, 200, tunnelState());
   }
   if (path === '/api/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -138,6 +185,17 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (path === '/api/liveview.mjpg') return camera.addViewer(res);
+  if (path === '/api/liveview.jpg') {
+    const f = await camera.pullFrame(+url.searchParams.get('after') || 0);
+    if (!f) { res.writeHead(204, { 'Cache-Control': 'no-store' }); return res.end(); }
+    const out = shrink(f);
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg', 'Content-Length': out.length, 'Cache-Control': 'no-store', 'X-Seq': f.seq,
+      ...(f.af && { 'X-AF': `${f.af.x},${f.af.y},${f.af.w},${f.af.h}` }),
+    });
+    return res.end(out);
+  }
+  if (path.startsWith('/captures/.thumbs/')) return serveFile(req, res, THUMBS, path.slice('/captures/.thumbs/'.length));
   if (path.startsWith('/captures/')) return serveFile(req, res, CAPTURES, path.slice('/captures/'.length));
 
   const handler = routes[`${req.method} ${path}`];
@@ -155,6 +213,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => {
+  tunnel.stop();
   await camera.stopMovie().catch(() => {});
   await camera.close();
   process.exit(0);
