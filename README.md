@@ -42,6 +42,20 @@ Click **📱 Phone** in the app on the laptop and scan the QR code with a phone 
 
 The Z50II only records when its **photo/video switch** is on video. If it isn't, the app says so. Clips are downloaded into `captures/` like photos once you stop recording. Large clips pause live view for a few seconds while they copy.
 
+### Shot advisor (AI)
+
+Pick what you're shooting (low-light boudoir, outdoor portrait, action, landscape…), add optional notes, and press **Suggest settings** (or **A**, or say "suggest settings"). The app sends the current live view frame and the camera's settings to a vision model. The model suggests an aperture, shutter speed, ISO, exposure compensation, white balance, metering, focus mode and quality, choosing only values your camera offers. It also explains why and adds a few tips. **Apply** (or saying "apply settings") sets them on the camera. If the mode dial blocks a setting (for example, shutter speed in A mode), the app strikes it out and suggests a mode instead.
+
+To enable it, create a `.env` file next to `package.json`, then restart the server:
+
+```
+OPENROUTER_API_KEY=sk-or-...
+# optional: which model the picker starts on
+ADVISOR_MODEL=anthropic/claude-haiku-5.5
+```
+
+The **Model** picker on the card switches between Claude Haiku 5.5, DeepSeek V4.1 Flash and Gemini 3.1 Flash Lite, all through OpenRouter. To offer other image-capable models, set `ADVISOR_MODELS` to a comma-separated list of OpenRouter model IDs. To also offer Haiku through Anthropic's own API, add `ANTHROPIC_API_KEY`. Each request sends one frame of about 1024px. In testing, a request took 3–8 seconds and cost well under a cent.
+
 ### Keyboard
 
 | Key | Action |
@@ -52,6 +66,7 @@ The Z50II only records when its **photo/video switch** is on video. If it isn't,
 | G | Grid overlay |
 | Z | Zoom 1× → 2× → 3× |
 | R | Start/stop video recording |
+| A | Ask the shot advisor for settings |
 | Click/tap live view | Move focus point there and focus |
 | Esc | Cancel countdown / burst / time-lapse |
 
@@ -60,6 +75,7 @@ The Z50II only records when its **photo/video switch** is on video. If it isn't,
 - **Voice** uses the browser's built-in speech recognition. Chrome and Edge send the audio to Google's or Microsoft's speech service.
 - **Gestures** run locally in the browser, but the first time you turn them on, the MediaPipe runtime and model download from jsDelivr and Google's model storage.
 - **Clap** detection is fully local.
+- **Shot advisor** sends the live view frame to OpenRouter (and on to the model provider) or to Anthropic, but only when you press the button. Keep that in mind for private or client sessions.
 
 ## How it works
 
@@ -91,6 +107,8 @@ browser  ──HTTP/SSE/MJPEG──▶  src/server.js (Node)  ──stdin/stdout
 | POST | `/api/liveview` | `{ "on": true }` |
 | POST | `/api/prop` | `{ "code": 20495, "value": 800 }` |
 | POST | `/api/prop/step` | `{ "code": 20495, "delta": 1 }` |
+| GET | `/api/advisor` | Advisor provider, model and scene list |
+| POST | `/api/advise` | `{ "scene": "boudoir", "notes": "handheld" }` |
 | POST | `/api/reconnect` | |
 
 Environment variables: `PORT` (default 8765), `CAPTURES_DIR` (default `./captures`) and `LAN` (set to `0` for laptop-only access).

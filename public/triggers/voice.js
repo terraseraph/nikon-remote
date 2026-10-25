@@ -11,6 +11,8 @@ const COMMANDS = [
   [/\b(stop|end) (the )?time ?lapse\b/, () => ['Stop time-lapse', a => a.timelapse(false)]],
   [/\b(stop|end|finish) (the )?(recording|video|filming)\b|\bcut\b/, () => ['Stop recording', a => a.record(false)]],
   [/\b(start )?(recording|record( a)? video|filming|action)\b/, () => ['Start recording', a => a.record(true)]],
+  [/\b(apply|use) (the |those |these )?(suggested )?(settings|suggestions)\b/, () => ['Apply suggestions', a => a.applyAdvice()]],
+  [/\b(suggest|recommend) (some |the )?settings\b|\bwhat settings\b/, () => ['Suggest settings', a => a.advise()]],
   [/\bzoom in\b/, () => ['Zoom in', a => a.zoom('in')]],
   [/\bzoom out\b/, () => ['Zoom out', a => a.zoom('out')]],
   [/\b(stop|cancel|abort|never ?mind)\b/, () => ['Cancel', a => a.cancel()]],

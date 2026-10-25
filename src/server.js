@@ -8,9 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { Camera } from './camera.js';
+import { advise, advisorConfig, SCENES } from './advisor.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
+// API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file next to package.json.
+if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'));
 const CAPTURES = process.env.CAPTURES_DIR || join(ROOT, 'captures');
 const PORT = +process.env.PORT || 8765;
 const LAN = process.env.LAN !== '0'; // LAN=0 keeps the server reachable from this machine only
@@ -101,6 +104,8 @@ const routes = {
   'POST /api/liveview': b => camera.setLiveView(b.on).then(() => camera.state()),
   'POST /api/prop': b => camera.setProp(+b.code, b.value).then(() => camera.props[+b.code]),
   'POST /api/prop/step': b => camera.stepProp(+b.code, +b.delta).then(() => camera.props[+b.code]),
+  'GET /api/advisor': () => ({ ...advisorConfig(), scenes: Object.keys(SCENES) }),
+  'POST /api/advise': b => advise(camera, { scene: b.scene, notes: String(b.notes || '').slice(0, 500), model: b.model }),
   'POST /api/reconnect': () => camera.reconnect().then(() => camera.state()),
 };
 
