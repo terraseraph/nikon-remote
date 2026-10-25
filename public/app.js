@@ -636,6 +636,8 @@ $('gridBtn').onclick = () => {
 };
 $('reconnectBtn').onclick = () => api('/api/reconnect', {}).catch(e => toast(e.message, true));
 $('zoomBtn').onclick = () => actions.zoom();
+$('rotateBtn').onclick = () => setOrient({ rotate: (orient.rotate + 90) % 360 });
+$('flipBtn').onclick = () => setOrient({ flip: !orient.flip });
 $('viewport').addEventListener('click', tapToFocus);
 // The stage resizes when the advanced drawer slides open, not only with the window.
 new ResizeObserver(() => fitViewport(true)).observe($('stage'));
@@ -730,10 +732,12 @@ let fitted = '';
 function fitViewport(force = false) {
   const c = $('lv'), stage = $('stage');
   if (!c.width) return;
-  const key = `${c.width}x${c.height}@${stage.clientWidth}x${stage.clientHeight}`;
+  const key = `${c.width}x${c.height}@${stage.clientWidth}x${stage.clientHeight}r${orient.rotate}`;
   if (key === fitted && !force) return;
   fitted = key;
-  const scale = Math.min(stage.clientWidth / c.width, stage.clientHeight / c.height);
+  // Turned sideways, the frame's width runs up the stage, so fit it against swapped sides.
+  const [w, h] = orient.rotate % 180 ? [c.height, c.width] : [c.width, c.height];
+  const scale = Math.min(stage.clientWidth / w, stage.clientHeight / h);
   $('viewport').style.width = `${Math.floor(c.width * scale)}px`;
   $('viewport').style.height = `${Math.floor(c.height * scale)}px`;
 }
@@ -747,9 +751,13 @@ function drawFocusBox() {
 }
 
 async function tapToFocus(e) {
-  // getBoundingClientRect includes the zoom transform, so taps map correctly while magnified.
+  // getBoundingClientRect includes the zoom and orientation transforms. Undo the rotation and
+  // mirror around the box centre so the tap lands on the same spot of the camera's frame.
   const r = $('viewport').getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  const a = -orient.rotate * Math.PI / 180, dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  const ux = Math.round(Math.cos(a)) * dx - Math.round(Math.sin(a)) * dy, uy = Math.round(Math.sin(a)) * dx + Math.round(Math.cos(a)) * dy;
+  const [bw, bh] = orient.rotate % 180 ? [r.height, r.width] : [r.width, r.height];
+  const x = 0.5 + (orient.flip ? -ux : ux) / bw, y = 0.5 + uy / bh;
   const ring = $('tapRing');
   ring.style.left = `${x * 100}%`; ring.style.top = `${y * 100}%`;
   ring.classList.remove('hidden'); ring.style.animation = 'none'; ring.offsetHeight; ring.style.animation = '';
@@ -772,6 +780,21 @@ function setZoom(i) {
   $('zoomBtn').classList.toggle('active', i > 0);
   drawFocusBox();
 }
+
+// Preview only: the camera's frame, captures and gesture input are untouched.
+const orient = { rotate: 0, flip: false };
+try { Object.assign(orient, JSON.parse(localStorage.orient || '{}')); } catch {}
+function setOrient(next) {
+  Object.assign(orient, next);
+  try { localStorage.orient = JSON.stringify(orient); } catch {}
+  $('orient').style.transform = `rotate(${orient.rotate}deg)${orient.flip ? ' scaleX(-1)' : ''}`;
+  $('rotateLabel').textContent = `${orient.rotate}°`;
+  $('rotateBtn').classList.toggle('active', orient.rotate > 0);
+  $('flipBtn').classList.toggle('active', orient.flip);
+  $('flipBtn').setAttribute('aria-pressed', orient.flip);
+  fitViewport(true);
+}
+setOrient({});
 
 // ---------- video recording ----------
 async function setRecording(on) {
@@ -1142,6 +1165,8 @@ document.addEventListener('keydown', e => {
   else if (k === 'l') $('lvBtn').click();
   else if (k === 'g') $('gridBtn').click();
   else if (k === 'z') actions.zoom();
+  else if (k === 'o') $('rotateBtn').click();
+  else if (k === 'h') $('flipBtn').click();
   else if (k === 'r') actions.record();
   else if (k === 'a') actions.advise();
   else if (k === 'i') { e.preventDefault(); inspo.toggle(); }
