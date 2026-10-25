@@ -1,0 +1,12 @@
+{
+  "name": "local-camera-nikon",
+  "version": "0.1.0",
+  "description": "Browser-based USB remote for Nikon cameras: live view, exposure control, voice and gesture triggers.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "probe": "node scripts/probe.js"
+  },
+  "engines": { "node": ">=20" }
+}

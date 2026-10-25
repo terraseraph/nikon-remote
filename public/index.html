@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nikon Remote</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="dot" id="connDot"></span><span id="camName">Connecting…</span></div>
+  <div class="badges">
+    <span class="badge" id="modeBadge" title="Exposure mode (set on the camera's dial)">–</span>
+    <span class="badge" id="batteryBadge" title="Battery">–</span>
+    <span class="badge listening hidden" id="voiceBadge">● Listening</span>
+    <span class="badge listening hidden" id="gestureBadge">✋ Gestures</span>
+    <span class="badge listening hidden" id="clapBadge">👏 Clap</span>
+  </div>
+  <div class="top-actions">
+    <button class="ghost" id="gridBtn" title="Rule-of-thirds grid (G)">Grid</button>
+    <button class="ghost" id="lvBtn" title="Toggle live view (L)">Live view</button>
+    <button class="ghost" id="reconnectBtn">Reconnect</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage" id="stage">
+    <canvas id="lv"></canvas>
+    <div class="placeholder" id="lvPlaceholder">Live view off</div>
+    <div class="grid-overlay hidden" id="grid"></div>
+    <div class="countdown hidden" id="countdown"></div>
+    <div class="flash" id="flash"></div>
+    <div class="gesture-hud hidden" id="gestureHud">
+      <video id="webcam" playsinline muted></video>
+      <div class="gesture-label"><span id="gestureName">–</span><div class="hold"><div id="gestureHold"></div></div></div>
+    </div>
+    <div class="toast hidden" id="toast"></div>
+    <div class="seq-status hidden" id="seqStatus"></div>
+  </section>
+
+  <aside class="panel">
+    <section class="card shutter-card">
+      <button id="shutter" class="shutter" title="Shoot (Space)"><span>SHOOT</span></button>
+      <div class="row opts">
+        <label>Delay<select id="delay"><option value="0">Off</option><option value="2">2 s</option><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option></select></label>
+        <label>Shots<select id="count"><option>1</option><option>2</option><option>3</option><option>5</option><option>10</option></select></label>
+        <label>Gap<select id="gap"><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option><option value="5">5 s</option></select></label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="afBefore" checked> Autofocus before shot</label>
+        <label class="check"><input type="checkbox" id="beeps" checked> Beeps</label>
+      </div>
+      <div class="row">
+        <button id="afBtn" class="secondary">Focus (F)</button>
+        <button id="cancelBtn" class="secondary">Cancel (Esc)</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Exposure</h2>
+      <div class="exposure" id="exposure"></div>
+      <p class="hint" id="modeHint"></p>
+    </section>
+
+    <section class="card">
+      <h2>Triggers</h2>
+      <div class="trigger">
+        <label class="switch"><input type="checkbox" id="voiceToggle"><span></span> Voice commands</label>
+        <details><summary>What can I say?</summary>
+          <ul class="cmds">
+            <li><b>“shoot”</b>, “capture”, “cheese”, “take a picture”</li>
+            <li><b>“timer five”</b> / “in ten seconds”</li>
+            <li><b>“burst three”</b> / “five shots”</li>
+            <li><b>“focus”</b></li>
+            <li><b>“brighter”</b> / “darker” (exposure comp)</li>
+            <li><b>“ISO up”</b> / “ISO down” / “ISO 800”</li>
+            <li><b>“live view on/off”</b>, “start/stop time-lapse”</li>
+            <li><b>“stop”</b> / “cancel”</li>
+          </ul>
+        </details>
+        <div class="heard" id="heard"></div>
+      </div>
+      <div class="trigger">
+        <label class="switch"><input type="checkbox" id="gestureToggle"><span></span> Hand gestures</label>
+        <div class="row opts">
+          <label>Watch<select id="gestureSource"><option value="liveview">Nikon live view</option><option value="webcam">Laptop webcam</option></select></label>
+        </div>
+        <div class="gesture-map" id="gestureMap"></div>
+      </div>
+      <div class="trigger">
+        <label class="switch"><input type="checkbox" id="clapToggle"><span></span> Clap to shoot</label>
+        <div class="row opts">
+          <label>Sensitivity<input type="range" id="clapSens" min="1" max="10" value="5"></label>
+          <div class="meter"><div id="clapMeter"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Time-lapse</h2>
+      <div class="row opts">
+        <label>Every<select id="tlEvery"><option value="2">2 s</option><option value="5" selected>5 s</option><option value="10">10 s</option><option value="30">30 s</option><option value="60">1 min</option><option value="300">5 min</option></select></label>
+        <label>Frames<select id="tlFrames"><option value="10">10</option><option value="30" selected>30</option><option value="100">100</option><option value="300">300</option><option value="0">∞</option></select></label>
+      </div>
+      <button id="tlBtn" class="secondary wide">Start time-lapse</button>
+    </section>
+  </aside>
+</main>
+
+<footer class="gallery">
+  <div class="gallery-head"><h2>Shots</h2><span class="hint" id="galleryHint">Photos are copied to the captures folder as they're taken</span></div>
+  <div class="strip" id="strip"></div>
+</footer>
+
+<dialog id="viewer">
+  <img id="viewerImg" alt="">
+  <div class="viewer-bar"><span id="viewerName"></span><a id="viewerDownload" download>Download</a><button id="viewerClose" class="ghost">Close</button></div>
+</dialog>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
