@@ -92,7 +92,7 @@ export class Camera extends EventEmitter {
 
   // Main loop: keeps live view frames flowing to viewers and polls camera events.
   async loop() {
-    let lastEvents = 0, lastRetry = Date.now();
+    let lastEvents = 0, lastModeCheck = 0, lastRetry = Date.now();
     for (;;) {
       try {
         if (!this.connected) {
@@ -107,6 +107,7 @@ export class Camera extends EventEmitter {
         if (this.liveView && remote !== this.smallFrames) await this.setFrameSize(remote);
         if (this.liveView && !this.capturing) await this.pumpFrame();
         if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.pollEvents(); }
+        if (Date.now() - lastModeCheck > 1000 && !this.capturing) { lastModeCheck = Date.now(); await this.checkMode(); }
         await sleep(this.liveView ? 30 : 150);
       } catch (e) {
         this.emit('log', `loop: ${e.message}`);
@@ -285,6 +286,16 @@ export class Camera extends EventEmitter {
       else if (ev.code === 0x4006 && PROPS[ev.param]) await this.refreshProp(ev.param);
       else if (ev.code === 0x4006 && ev.param === 0xd1a2) {} // live view status: handled by frame errors
     }
+  }
+
+  // Nikon Z bodies don't reliably send DevicePropChanged when the mode dial is turned,
+  // so re-read the mode now and then and refresh as if the event had arrived.
+  async checkMode() {
+    const p = this.props[0x500e];
+    if (!p) return;
+    const res = await this.bridge.send(Op.GetDevicePropDesc, [0x500e], { dir: 'read' });
+    if (res.code !== OK) return;
+    if (parsePropDesc(res.data).current !== p.value) await this.refreshProp(0x500e);
   }
 
   async refreshProp(code, emit = true) {

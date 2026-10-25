@@ -307,9 +307,9 @@ function nudge(name, d) {
 for (const name of CHIP_ROWS) {
   const chip = document.createElement('button');
   chip.className = 'chip hidden'; chip.dataset.name = name;
-  chip.innerHTML = '<span class="l"></span><span class="v mono"></span>';
+  chip.innerHTML = '<span class="l"></span><span class="vs"><span class="v mono"></span><span class="n mono"></span></span>';
   chip.querySelector('.l').textContent = LABEL[name];
-  chip.onclick = () => { openChip = openChip === name ? null : name; renderProps(); };
+  chip.onclick = () => { openChip = openChip === name ? null : name; if (openChip) toggleAssist(false); renderProps(); };
   $('chips').append(chip);
 }
 for (const name of EXPOSURE_ROWS) {
@@ -359,6 +359,7 @@ function renderProps() {
   $('batteryBadge').textContent = by.battery ? `${by.battery.value}%` : '–';
 
   if (openChip && !editable(by[openChip])) openChip = null;
+  syncAdvice(by);
   for (const chip of $('chips').children) {
     const p = by[chip.dataset.name];
     chip.classList.toggle('hidden', !p);
@@ -367,6 +368,7 @@ function renderProps() {
     chip.disabled = !editable(p);
     chip.classList.toggle('on', openChip === p.name);
     chip.setAttribute('aria-expanded', openChip === p.name);
+    renderChipSuggestion(chip, p);
   }
   renderRuler(by);
 
@@ -611,63 +613,203 @@ function renderRecording() {
   recTimer = setInterval(tick, 500);
 }
 
-// ---------- shot advisor ----------
-let advice = null;
+// ---------- shot assist ----------
+// Lives in the exposure bar: pick a scene (and conditions) or describe it, and the suggested
+// values show on the exposure chips with one Apply. Settings the mode dial locks are queued and
+// set as soon as the camera reports them writable again.
+const SCENES = [['boudoir', 'Low-light boudoir'], ['portrait', 'Portrait'], ['action', 'Action'], ['landscape', 'Landscape'],
+  ['street', 'Street'], ['event', 'Indoor event'], ['night', 'Night'], ['product', 'Product']];
+const CONDITIONS = ['Handheld', 'Tripod', 'No flash', 'Moody', 'Bright and airy', 'Freeze motion', 'Motion blur'];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const assist = (() => {
+  try { return { scene: 'boudoir', mods: [], notes: '', ...JSON.parse(localStorage.assist || '{}') }; }
+  catch { return { scene: 'boudoir', mods: [], notes: '' }; }
+})();
+const saveAssist = () => { try { localStorage.assist = JSON.stringify(assist); } catch {} };
+let advice = null; // { summary, mode, tips, model, settings: [{ name, code, value, display, reason, status }] }
+let assistOpen = false, assistBusy = false, assistReady = true;
+
+// status: 'pending' = suggested, not applied yet; 'queued' = accepted but locked by the dial; 'done'.
+const openSuggestion = name => advice?.settings.find(s => s.name === name && s.status !== 'done');
+const isLocked = s => !propsByName()[s.name]?.writable;
+const modeName = () => { const m = propsByName().mode; return m ? fmt('mode', m.value) : 'this'; };
+const LOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+
+function renderChipSuggestion(chip, p) {
+  const s = openSuggestion(p.name);
+  const locked = !!s && !p.writable;
+  chip.classList.toggle('sug', !!s);
+  chip.classList.toggle('lk', locked);
+  chip.querySelector('.n').textContent = s ? s.display : '';
+  const why = s?.reason ? ` (${s.reason})` : '';
+  chip.title = !s ? '' : locked
+    ? `Suggested ${s.display}, but ${LABEL[p.name].toLowerCase()} is locked in ${modeName()} mode${why}`
+    : `Suggested ${s.display}${why}`;
+  chip.setAttribute('aria-label', `${LABEL[p.name]} ${fmt(p.name, p.value)}${s ? `, suggested ${s.display}${locked ? ', locked by the mode dial' : ''}` : ''}`);
+}
+
+// Called on every property update: retire suggestions the camera now matches, and set queued
+// ones as soon as the dial unlocks them.
+function syncAdvice(by) {
+  if (advice) {
+    for (const s of advice.settings) {
+      const p = by[s.name];
+      if (!p || s.status === 'done' || s.applying) continue;
+      if (p.value === s.value) { s.status = 'done'; continue; }
+      if (s.status === 'queued' && p.writable) {
+        s.applying = true;
+        api('/api/prop', { code: p.code, value: s.value })
+          .then(() => { s.status = 'done'; toast(`${LABEL[s.name]} set to ${s.display}: the dial unlocked it`); })
+          .catch(e => toast(`${LABEL[s.name]}: ${e.message}`, true))
+          .finally(() => { s.applying = false; renderProps(); });
+      }
+    }
+  }
+  renderAssistBar();
+  if (assistOpen) renderAssistOut();
+}
+
+function renderAssistBar() {
+  const open = advice?.settings.filter(s => s.status !== 'done') || [];
+  const pending = open.filter(s => s.status === 'pending');
+  const now = pending.filter(s => !isLocked(s)).length, later = open.length - now;
+  $('asBar').classList.toggle('hidden', !open.length);
+  $('asDot').classList.toggle('hidden', !open.length || assistOpen);
+  const btn = $('asApply');
+  btn.classList.toggle('waiting', !now);
+  btn.disabled = !pending.length;
+  btn.innerHTML = now
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Apply ${now}${later ? `<span class="later">+${later} locked</span>` : ''}`
+    : `${LOCK}${pending.length ? 'Apply when unlocked' : `${later} waiting for the dial`}`;
+  btn.title = later ? `Locked in ${modeName()} mode: ${open.filter(isLocked).map(s => LABEL[s.name]).join(', ')}` : '';
+}
+
+function renderAssistTags() {
+  $('asScenes').replaceChildren(...SCENES.map(([id, label]) => {
+    const b = document.createElement('button');
+    b.className = 'tag'; b.textContent = label; b.setAttribute('aria-pressed', assist.scene === id);
+    b.onclick = () => { assist.scene = assist.scene === id ? '' : id; saveAssist(); renderAssistTags(); };
+    return b;
+  }));
+  $('asMods').replaceChildren(...CONDITIONS.map(m => {
+    const b = document.createElement('button');
+    b.className = 'tag sm'; b.textContent = m; b.setAttribute('aria-pressed', assist.mods.includes(m));
+    b.onclick = () => {
+      assist.mods = assist.mods.includes(m) ? assist.mods.filter(x => x !== m) : [...assist.mods, m];
+      saveAssist(); renderAssistTags();
+    };
+    return b;
+  }));
+}
+
+function renderAssistOut() {
+  const out = $('asOut');
+  out.classList.toggle('hidden', !advice);
+  if (!advice) return;
+  const open = advice.settings.filter(s => s.status !== 'done');
+  const locked = open.filter(isLocked);
+  // Chips show their own suggestions; list only the ones that have no chip.
+  const offChip = open.filter(s => !CHIP_ROWS.includes(s.name));
+  const they = locked.length > 1 ? 'they will' : 'it will';
+  const html = `
+    <p class="as-sum">${esc(advice.summary)}</p>
+    ${offChip.length ? `<p class="as-also">Also: ${offChip.map(s => `${esc(LABEL[s.name] || s.name)} → <b>${esc(s.display)}</b>`).join(' · ')}</p>` : ''}
+    ${locked.length ? `<p class="as-warn">${LOCK}<span>${locked.map(s => `${esc(LABEL[s.name])} ${esc(s.display)}`).join(', ')}
+      can't be set in ${esc(modeName())} mode. Turn the dial to ${esc(advice.mode || 'M')} and ${they} be set${locked.every(s => s.status === 'queued') ? '' : ' after you press Apply'}.</span></p>` : ''}
+    ${!open.length ? '<p class="as-also">The camera matches these suggestions.</p>' : ''}
+    <div class="as-foot">
+      ${advice.tips.length ? `<details class="as-tips"><summary>${advice.tips.length} tip${advice.tips.length > 1 ? 's' : ''}</summary><ul>${advice.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : '<span></span>'}
+      ${open.length ? '<button class="as-clear" data-act="discard">Discard</button>' : ''}
+    </div>`;
+  // Property events re-render often; only rebuild when the text changes, so open tips stay open.
+  if (html === out.dataset.html) return;
+  const tipsOpen = out.querySelector('.as-tips')?.open;
+  out.dataset.html = html;
+  out.innerHTML = html;
+  if (tipsOpen) out.querySelector('.as-tips')?.setAttribute('open', '');
+}
+
+function toggleAssist(open = !assistOpen) {
+  if (open === assistOpen) return;
+  assistOpen = open;
+  $('assist').classList.toggle('hidden', !open);
+  $('assistBtn').classList.toggle('active', open);
+  $('assistBtn').setAttribute('aria-expanded', open);
+  if (open && openChip) { openChip = null; renderProps(); }
+  if (open) { renderAssistTags(); renderAssistOut(); }
+  renderAssistBar();
+}
 
 async function suggestSettings() {
-  const btn = $('advBtn');
-  if (btn.classList.contains('busy')) return;
-  btn.classList.add('busy'); btn.textContent = 'Looking at the scene…';
+  toggleAssist(true);
+  if (assistBusy) return;
+  if (!assistReady) return toast('Add OPENROUTER_API_KEY to .env and restart to use shot assist', true);
+  assistBusy = true;
+  $('assist').classList.add('busy'); $('assistBtn').classList.add('busy');
+  $('asGo').textContent = 'Looking…';
   try {
-    advice = await api('/api/advise', { scene: $('advScene').value, notes: $('advNotes').value, model: $('advModel').value });
-    renderAdvice();
-    toggleAdv(true, 'advisor');
+    const notes = [...assist.mods, $('asNotes').value.trim()].filter(Boolean).join('; ');
+    const r = await api('/api/advise', { scene: assist.scene, notes, model: $('advModel').value });
+    advice = { ...r, settings: r.settings.map(s => ({ ...s, status: s.same ? 'done' : 'pending' })) };
+    renderProps();
+    renderAssistOut();
   } catch (e) { toast(e.message, true); }
-  finally { btn.classList.remove('busy'); btn.textContent = 'Suggest settings (A)'; }
-}
-
-function renderAdvice() {
-  const box = $('advResult');
-  box.classList.toggle('hidden', !advice);
-  if (!advice) return;
-  const changes = advice.settings.filter(s => !s.same && s.writable);
-  const rows = advice.settings.map(s => {
-    const cls = s.same ? 'same' : s.writable ? '' : 'locked';
-    const val = s.same ? `${esc(s.display)} ✓` : `${esc(s.current)} → <b>${esc(s.display)}</b>`;
-    return `<span class="name">${esc(s.label)}</span><span class="val ${cls}">${val}</span>${s.reason ? `<span class="why">${esc(s.reason)}</span>` : ''}`;
-  }).join('');
-  const locked = advice.settings.some(s => !s.same && !s.writable);
-  box.innerHTML = `
-    <p class="summary">${esc(advice.summary)}</p>
-    ${advice.mode ? `<p class="mode">Suggested mode: ${esc(advice.mode)}${locked ? ' — turn the dial to unlock the struck-out settings' : ''}</p>` : ''}
-    <div class="adv-settings">${rows || '<span class="name">No changes suggested</span>'}</div>
-    ${advice.tips.length ? `<ul>${advice.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-    ${changes.length ? `<button id="advApply" class="secondary wide">Apply ${changes.length} change${changes.length > 1 ? 's' : ''}</button>` : ''}
-    <p class="hint">${esc(advice.model)}</p>`;
-  $('advApply')?.addEventListener('click', applyAdvice);
-}
-
-async function applyAdvice() {
-  if (!advice) return toast('Ask for suggestions first', true);
-  const failed = [];
-  for (const s of advice.settings.filter(s => !s.same && s.writable)) {
-    try { await api('/api/prop', { code: s.code, value: s.value }); s.same = true; s.current = s.display; }
-    catch (e) { failed.push(`${s.label}: ${e.message}`); }
+  finally {
+    assistBusy = false;
+    $('assist').classList.remove('busy'); $('assistBtn').classList.remove('busy');
+    $('asGo').textContent = 'Suggest';
   }
-  renderAdvice();
-  toast(failed.length ? failed.join(' · ') : 'Settings applied', failed.length > 0);
 }
 
-$('advBtn').onclick = suggestSettings;
-$('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} };
+// One tap: set everything the dial allows now, queue the rest.
+async function applyAdvice() {
+  const pending = advice?.settings.filter(s => s.status === 'pending') || [];
+  if (!pending.length) return toast(advice ? 'Nothing left to apply' : 'Ask shot assist for suggestions first', !advice);
+  const failed = [], queued = [];
+  for (const s of pending) {
+    if (isLocked(s)) { s.status = 'queued'; queued.push(LABEL[s.name]); continue; }
+    try { await setPropValue(s.name, s.value); s.status = 'done'; }
+    catch (e) { failed.push(`${LABEL[s.name]}: ${e.message}`); }
+  }
+  renderProps();
+  if (failed.length) toast(failed.join(' · '), true);
+  else toast(queued.length ? `Applied. ${queued.join(', ')} will be set when you turn the dial to ${advice.mode || 'M'}` : 'Settings applied');
+  if (!queued.length && !failed.length) toggleAssist(false);
+}
+
+function discardAdvice() { advice = null; renderProps(); renderAssistOut(); }
+
+// Like setProp, but throws so Apply can report each setting.
+async function setPropValue(name, v) {
+  const p = propsByName()[name];
+  const prev = p.value;
+  p.value = v; renderProps();
+  try { await api('/api/prop', { code: p.code, value: v }); }
+  catch (e) { p.value = prev; renderProps(); throw e; }
+}
+
+$('assistBtn').onclick = () => toggleAssist();
+$('asClose').onclick = () => toggleAssist(false);
+$('asGo').onclick = suggestSettings;
+$('asApply').onclick = applyAdvice;
+$('asDiscard').onclick = discardAdvice;
+$('asOut').addEventListener('click', e => { if (e.target.closest('[data-act="discard"]')) discardAdvice(); });
+$('asModel').onclick = () => { toggleAssist(false); toggleAdv(true, 'advisor'); };
+$('asNotes').value = assist.notes;
+$('asNotes').oninput = () => { assist.notes = $('asNotes').value; saveAssist(); };
+$('asNotes').onkeydown = e => { if (e.key === 'Enter') suggestSettings(); else if (e.key === 'Escape') toggleAssist(false); };
+const showModel = () => { const o = $('advModel').selectedOptions[0]; $('asModel').textContent = o ? o.textContent : 'No model'; };
+$('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} showModel(); };
 api('/api/advisor').then(c => {
   for (const m of c.models) $('advModel').add(new Option(m.label, m.id));
   try { if (c.models.some(m => m.id === localStorage.advModel)) $('advModel').value = localStorage.advModel; } catch {}
+  showModel();
   if (c.provider) return;
+  assistReady = false;
   $('advModel').disabled = true;
-  $('advBtn').disabled = true;
-  $('advHint').textContent = 'Add OPENROUTER_API_KEY=… to a .env file next to package.json and restart to enable this.';
+  $('asGo').disabled = true;
+  $('asModel').textContent = 'Not set up';
+  $('advHint').textContent = 'Add OPENROUTER_API_KEY=… to a .env file next to package.json and restart to enable shot assist.';
 }).catch(() => {});
 
 // ---------- phone remote ----------
@@ -743,6 +885,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'm') toggleAdv();
   else if (k === 'escape') {
     if (openChip) { openChip = null; renderProps(); }
+    toggleAssist(false);
     toggleFilm(false);
     cancel();
   }

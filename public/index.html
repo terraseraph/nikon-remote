@@ -214,21 +214,8 @@
     </div>
 
     <div class="pane hidden" data-pane="advisor">
-      <label class="field">Shooting<select id="advScene">
-        <option value="boudoir">Low-light boudoir</option>
-        <option value="portrait">Outdoor portrait</option>
-        <option value="landscape">Landscape</option>
-        <option value="action">Action / sports</option>
-        <option value="street">Street</option>
-        <option value="event">Indoor event</option>
-        <option value="night">Night / astro</option>
-        <option value="product">Product</option>
-      </select></label>
       <label class="field">Model<select id="advModel"></select></label>
-      <input id="advNotes" class="adv-notes" placeholder="Notes (optional): e.g. handheld, want a moody look" maxlength="500">
-      <button id="advBtn" class="secondary wide">Suggest settings (A)</button>
-      <div id="advResult" class="adv-result hidden"></div>
-      <p class="hint" id="advHint">Sends the live view frame to an AI model, which suggests settings for this scene.</p>
+      <p class="hint" id="advHint">Shot assist (the ✦ button by the exposure settings, or A) sends the live view frame to this model, which suggests settings for the scene.</p>
     </div>
   </section>
 </aside>
@@ -239,7 +226,29 @@
     <div class="rwin"><div class="rtrack" id="rtrack"></div><div class="rcenter"></div></div>
     <button class="step" id="rulerUp" aria-label="Next value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
   </div>
+  <section class="assist hidden" id="assist" aria-label="Shot assist">
+    <div class="as-head">
+      <b>Shot assist</b>
+      <button class="as-model" id="asModel" title="Change the AI model"></button>
+      <button class="close" id="asClose" aria-label="Close shot assist">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+    </div>
+    <div class="as-tags" id="asScenes" role="group" aria-label="Scene"></div>
+    <div class="as-tags" id="asMods" role="group" aria-label="Conditions"></div>
+    <div class="as-ask">
+      <input id="asNotes" placeholder="Describe the scene or the look you want" maxlength="300" aria-label="Scene description">
+      <button id="asGo" class="as-go">Suggest</button>
+    </div>
+    <div class="as-out hidden" id="asOut" aria-live="polite"></div>
+  </section>
   <div class="chips" id="chips" role="group" aria-label="Exposure"></div>
+  <div class="as-bar hidden" id="asBar">
+    <button class="as-apply" id="asApply"></button>
+    <button class="step as-x" id="asDiscard" title="Discard suggestions" aria-label="Discard suggestions">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+  </div>
+  <button class="step as-btn" id="assistBtn" title="Shot assist: AI-suggested settings (A)" aria-label="Shot assist" aria-expanded="false" aria-controls="assist">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 2l.6 1.4L7 4l-1.4.6L5 6l-.6-1.4L3 4l1.4-.6z"/></svg><span class="as-dot hidden" id="asDot"></span></button>
   <button class="step" id="expoMore" title="All exposure settings" aria-label="All exposure settings">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
 </footer>

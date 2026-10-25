@@ -79,7 +79,9 @@ The Z50II only records when its **photo/video switch** is on video. If it isn't,
 
 ### Shot advisor (AI)
 
-Pick what you're shooting (low-light boudoir, outdoor portrait, action, landscape…), add optional notes, and press **Suggest settings** (or **A**, or say "suggest settings"). The app sends the current live view frame and the camera's settings to a vision model. The model suggests an aperture, shutter speed, ISO, exposure compensation, white balance, metering, focus mode and quality, choosing only values your camera offers. It also explains why and adds a few tips. **Apply** (or saying "apply settings") sets them on the camera. If the mode dial blocks a setting (for example, shutter speed in A mode), the app strikes it out and suggests a mode instead.
+Press the **✦** button at the end of the exposure bar (or **A**, or say "suggest settings"). Pick a scene (low-light boudoir, portrait, action, landscape…), tap any conditions that apply (handheld, tripod, no flash, moody…), or describe the scene in your own words, then press **Suggest**. The app sends the current live view frame and the camera's settings to a vision model, which suggests aperture, shutter speed, ISO, exposure compensation, white balance, metering, focus mode and quality, choosing only values your camera offers.
+
+The suggestions appear on the exposure chips themselves (old value → new value), with a short summary and tips in the popover. One **Apply** in the bar (or saying "apply settings") sets them all. Settings the mode dial blocks, such as shutter speed in A mode, show a lock and a warning. When you press Apply they're queued, then set automatically as soon as you turn the dial to a mode that allows them.
 
 To enable it, create a `.env` file next to `package.json`, then restart the server:
 
@@ -89,7 +91,7 @@ OPENROUTER_API_KEY=sk-or-...
 ADVISOR_MODEL=anthropic/claude-haiku-5.5
 ```
 
-The **Model** picker on the card switches between Claude Haiku 5.5, DeepSeek V4.1 Flash and Gemini 3.1 Flash Lite, all through OpenRouter. To offer other image-capable models, set `ADVISOR_MODELS` to a comma-separated list of OpenRouter model IDs. To also offer Haiku through Anthropic's own API, add `ANTHROPIC_API_KEY`. Each request sends one frame of about 1024px. In testing, a request took 3–8 seconds and cost well under a cent.
+The **Model** picker (More › Advisor, or tap the model name in the popover) switches between Claude Haiku 5.5, DeepSeek V4.1 Flash and Gemini 3.1 Flash Lite, all through OpenRouter. To offer other image-capable models, set `ADVISOR_MODELS` to a comma-separated list of OpenRouter model IDs. To also offer Haiku through Anthropic's own API, add `ANTHROPIC_API_KEY`. Each request sends one frame of about 1024px. In testing, a request took 3–8 seconds and cost well under a cent.
 
 ### Keyboard
 
