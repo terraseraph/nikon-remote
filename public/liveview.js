@@ -5,7 +5,9 @@
 const STALL_MS = 3000;
 
 export class LiveView {
-  constructor(canvas, url = '/api/liveview.mjpg') {
+  constructor(canvas, { url = '/api/liveview.mjpg', onFrame } = {}) {
+    this.onFrame = onFrame; // (liveView) => void, after each painted frame
+    this.af = null;         // camera focus box {x, y, w, h} as fractions of the frame
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.url = url;
@@ -51,6 +53,7 @@ export class LiveView {
         let frame;
         while ((frame = nextFrame(buf))) {
           buf = buf.subarray(frame.end);
+          if (frame.af) this.af = frame.af;
           this.paint(frame.jpeg);
         }
       }
@@ -60,7 +63,7 @@ export class LiveView {
 
   async paint(jpeg) {
     this.lastFrame = performance.now();
-    if (this.decoding) return; // drop frames rather than fall behind
+    if (!jpeg || this.decoding) return; // drop frames rather than fall behind
     this.decoding = true;
     try {
       const bmp = await createImageBitmap(new Blob([jpeg], { type: 'image/jpeg' }));
@@ -70,6 +73,7 @@ export class LiveView {
       this.ctx.drawImage(bmp, 0, 0);
       bmp.close();
       this.frames++;
+      this.onFrame?.(this);
     } catch {} finally { this.decoding = false; }
   }
 }
@@ -90,7 +94,11 @@ function nextFrame(buf) {
   const start = h + 4;
   if (!Number.isFinite(len)) return { jpeg: null, end: start }; // malformed header, skip it
   if (buf.length < start + len) return null;
-  return { jpeg: buf.slice(start, start + len), end: start + len };
+  const af = header.match(/X-AF:\s*([\d.]+),([\d.]+),([\d.]+),([\d.]+)/i);
+  return {
+    jpeg: buf.slice(start, start + len), end: start + len,
+    af: af && { x: +af[1], y: +af[2], w: +af[3], h: +af[4] },
+  };
 }
 
 function indexOf(buf, seq) {

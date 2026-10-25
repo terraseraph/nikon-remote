@@ -9,6 +9,10 @@ const N = '(\\d+|' + Object.keys(NUMBERS).join('|') + ')';
 const COMMANDS = [
   [/\b(start|begin) (a |the )?time ?lapse\b/, () => ['Start time-lapse', a => a.timelapse(true)]],
   [/\b(stop|end) (the )?time ?lapse\b/, () => ['Stop time-lapse', a => a.timelapse(false)]],
+  [/\b(stop|end|finish) (the )?(recording|video|filming)\b|\bcut\b/, () => ['Stop recording', a => a.record(false)]],
+  [/\b(start )?(recording|record( a)? video|filming|action)\b/, () => ['Start recording', a => a.record(true)]],
+  [/\bzoom in\b/, () => ['Zoom in', a => a.zoom('in')]],
+  [/\bzoom out\b/, () => ['Zoom out', a => a.zoom('out')]],
   [/\b(stop|cancel|abort|never ?mind)\b/, () => ['Cancel', a => a.cancel()]],
   [/\blive ?view (on|off)\b/, m => [`Live view ${m[1]}`, a => a.liveView(m[1] === 'on')]],
   [new RegExp(`\\b(?:timer|in|wait) ${N}(?: seconds?)?\\b`), m => [`Timer ${num(m[1])} s`, a => a.timer(Math.min(30, num(m[1])))]],

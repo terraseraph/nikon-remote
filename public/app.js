@@ -8,7 +8,7 @@ const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let state = { connected: false, props: {} };
-const liveView = new LiveView($('lv'));
+const liveView = new LiveView($('lv'), { onFrame: () => { fitViewport(); drawFocusBox(); } });
 
 // ---------- API ----------
 async function api(path, body) {
@@ -159,6 +159,8 @@ export const actions = {
     try { await api('/api/prop', { code: PROP.iso, value: v }); toast(`ISO ${v}`); } catch (e) { toast(e.message, true); }
   },
   liveView: on => api('/api/liveview', { on }),
+  record: on => setRecording(on ?? !state.recordingSince),
+  zoom: dir => setZoom(dir === 'in' ? Math.min(ZOOMS.length - 1, zoomIndex + 1) : dir === 'out' ? Math.max(0, zoomIndex - 1) : (zoomIndex + 1) % ZOOMS.length),
   timelapse: on => (on ? startTimelapse() : stopTimelapse()),
 };
 
@@ -170,10 +172,11 @@ function render() {
   $('shutter').disabled = !state.connected;
   $('lvBtn').classList.toggle('active', state.wantLiveView);
   const showLv = state.connected && state.wantLiveView;
-  $('lv').classList.toggle('hidden', !showLv);
+  $('viewport').classList.toggle('hidden', !showLv);
   $('lvPlaceholder').classList.toggle('hidden', showLv);
   $('lvPlaceholder').textContent = state.connected ? 'Live view off — press L or the Live view button' : 'Plug in the camera and switch it on';
   showLv ? liveView.start() : liveView.stop();
+  renderRecording();
   renderProps();
 }
 
@@ -228,8 +231,11 @@ function addPhoto(p, fresh = false) {
   img.src = p.thumb; img.alt = p.name; img.loading = 'lazy';
   img.onerror = () => { img.onerror = null; img.src = p.preview; };
   b.append(img);
+  if (p.video) b.insertAdjacentHTML('beforeend', '<span class="play">▶</span>');
   b.onclick = () => {
-    $('viewerImg').src = p.preview;
+    $('viewerImg').classList.toggle('hidden', !!p.video);
+    $('viewerVideo').classList.toggle('hidden', !p.video);
+    if (p.video) $('viewerVideo').src = p.url; else $('viewerImg').src = p.preview;
     $('viewerName').textContent = `${p.day} · ${p.name} · ${(p.size / 1e6).toFixed(1)} MB`;
     $('viewerDownload').href = p.url; $('viewerDownload').download = p.name;
     $('viewer').showModal();
@@ -238,6 +244,7 @@ function addPhoto(p, fresh = false) {
   $('strip').prepend(b);
 }
 $('viewerClose').onclick = () => $('viewer').close();
+$('viewer').addEventListener('close', () => { $('viewerVideo').pause(); $('viewerVideo').removeAttribute('src'); });
 $('viewer').onclick = e => { if (e.target === $('viewer')) $('viewer').close(); };
 api('/api/photos').then(list => list.reverse().forEach(p => addPhoto(p)));
 
@@ -249,14 +256,123 @@ $('lvBtn').onclick = () => actions.liveView(!state.wantLiveView);
 $('gridBtn').onclick = () => { $('grid').classList.toggle('hidden'); $('gridBtn').classList.toggle('active'); };
 $('reconnectBtn').onclick = () => api('/api/reconnect', {}).catch(e => toast(e.message, true));
 $('tlBtn').onclick = () => (timelapse ? stopTimelapse() : startTimelapse());
+$('recBtn').onclick = () => actions.record();
+$('zoomBtn').onclick = () => actions.zoom();
+$('viewport').addEventListener('click', tapToFocus);
+window.addEventListener('resize', () => fitViewport(true));
+
+// ---------- live view framing: fit, focus box, tap-to-focus, zoom ----------
+let fitted = '';
+function fitViewport(force = false) {
+  const c = $('lv'), stage = $('stage');
+  if (!c.width) return;
+  const key = `${c.width}x${c.height}@${stage.clientWidth}x${stage.clientHeight}`;
+  if (key === fitted && !force) return;
+  fitted = key;
+  const scale = Math.min(stage.clientWidth / c.width, stage.clientHeight / c.height);
+  $('viewport').style.width = `${Math.floor(c.width * scale)}px`;
+  $('viewport').style.height = `${Math.floor(c.height * scale)}px`;
+}
+
+function drawFocusBox() {
+  const af = liveView.af, box = $('focusBox');
+  box.classList.toggle('hidden', !af);
+  if (!af) return;
+  Object.assign(box.style, { left: `${af.x * 100}%`, top: `${af.y * 100}%`, width: `${af.w * 100}%`, height: `${af.h * 100}%` });
+  if (zoomIndex) $('viewport').style.transformOrigin = `${(af.x + af.w / 2) * 100}% ${(af.y + af.h / 2) * 100}%`;
+}
+
+async function tapToFocus(e) {
+  // getBoundingClientRect includes the zoom transform, so taps map correctly while magnified.
+  const r = $('viewport').getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  const ring = $('tapRing');
+  ring.style.left = `${x * 100}%`; ring.style.top = `${y * 100}%`;
+  ring.classList.remove('hidden'); ring.style.animation = 'none'; ring.offsetHeight; ring.style.animation = '';
+  const box = $('focusBox');
+  box.classList.remove('ok', 'bad');
+  try {
+    const { focus } = await api('/api/focus-point', { x, y });
+    box.classList.add(focus === 'OK' ? 'ok' : 'bad');
+    if (focus !== 'OK') toast(`Focus: ${focus}`, true);
+  } catch (err) { box.classList.add('bad'); toast(err.message, true); }
+  setTimeout(() => box.classList.remove('ok', 'bad'), 1500);
+}
+
+const ZOOMS = [1, 2, 3];
+let zoomIndex = 0;
+function setZoom(i) {
+  zoomIndex = i;
+  $('viewport').style.transform = ZOOMS[i] === 1 ? '' : `scale(${ZOOMS[i]})`;
+  $('zoomBtn').textContent = `Zoom ${ZOOMS[i]}×`;
+  $('zoomBtn').classList.toggle('active', i > 0);
+  drawFocusBox();
+}
+
+// ---------- video recording ----------
+async function setRecording(on) {
+  if (seq || timelapse) return toast('Finish the current shots first', true);
+  try { await api('/api/movie', { on }); toast(on ? '● Recording' : 'Recording stopped'); }
+  catch (e) { toast(e.message, true); }
+}
+
+let recTimer;
+function renderRecording() {
+  const since = state.recordingSince;
+  $('recBtn').classList.toggle('on', !!since);
+  $('recLabel').textContent = since ? 'Stop recording (R)' : 'Record video (R)';
+  $('recBadge').classList.toggle('hidden', !since);
+  $('shutter').disabled = !state.connected || !!since;
+  clearInterval(recTimer);
+  if (!since) return;
+  const tick = () => {
+    const s = Math.floor((Date.now() - since) / 1000);
+    $('recBadge').textContent = `● REC ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  recTimer = setInterval(tick, 500);
+}
+
+// ---------- phone remote ----------
+let qrLib;
+async function showPhoneDialog() {
+  const { urls } = await api('/api/remote');
+  const list = $('qrList');
+  list.innerHTML = '';
+  if (!urls.length) list.textContent = 'No Wi-Fi/Ethernet network found on this laptop.';
+  qrLib ??= await new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+    sc.onload = () => resolve(window.qrcode);
+    sc.onerror = () => reject(new Error('Could not load the QR code library (offline?)'));
+    document.head.append(sc);
+  }).catch(e => { toast(e.message, true); return null; });
+  for (const url of urls) {
+    const item = document.createElement('div');
+    if (qrLib) {
+      const qr = qrLib(0, 'M'); qr.addData(url); qr.make();
+      item.innerHTML = `<div class="qr">${qr.createImgTag(6, 0)}</div>`;
+    }
+    const code = document.createElement('code'); code.textContent = url;
+    item.append(code);
+    list.append(item);
+  }
+  $('phoneDialog').showModal();
+}
+$('phoneBtn').onclick = () => showPhoneDialog().catch(e => toast(e.message, true));
+$('phoneClose').onclick = () => $('phoneDialog').close();
+// Only the laptop itself may see the access key, so the button only appears there.
+api('/api/remote').then(r => $('phoneBtn').classList.toggle('hidden', !r.lan)).catch(() => {});
 
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input, select, textarea') || e.repeat || $('viewer').open) return;
+  if (e.target.matches('input, select, textarea') || e.repeat || $('viewer').open || $('phoneDialog').open) return;
   const k = e.key.toLowerCase();
   if (k === ' ') { e.preventDefault(); actions.sequence(); }
   else if (k === 'f') actions.focus();
   else if (k === 'l') $('lvBtn').click();
   else if (k === 'g') $('gridBtn').click();
+  else if (k === 'z') actions.zoom();
+  else if (k === 'r') actions.record();
   else if (k === 'escape') cancel();
 });
 
@@ -305,3 +421,10 @@ const clap = new ClapTrigger({
   getSensitivity: () => +$('clapSens').value,
 });
 triggerToggle('clapToggle', 'clapBadge', clap);
+
+if (!window.isSecureContext) {
+  // Phones on plain http get no microphone/camera access: leave only live-view gestures.
+  for (const id of ['voiceToggle', 'clapToggle']) $(id).disabled = true;
+  $('gestureSource').querySelector('[value=webcam]').disabled = true;
+  $('secureHint').classList.remove('hidden');
+}

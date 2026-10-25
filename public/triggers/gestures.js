@@ -23,6 +23,7 @@ const CHOICES = {
   burst3: ['Burst ×3', a => a.burst(3)],
   timerBurst3: ['3 s timer, then 3 shots', a => a.timerBurst(3)],
   focus: ['Focus', a => a.focus()],
+  record: ['Start/stop video', a => a.record()],
   cancel: ['Cancel', a => a.cancel()],
   brighter: ['Brighter', a => a.brighter()],
   darker: ['Darker', a => a.darker()],

@@ -24,13 +24,29 @@ export const Op = {
   NikonGetLiveViewImage: 0x9203,
   NikonInitiateCaptureRecInMedia: 0x9207,
   NikonChangeAfArea: 0x9205,
+  NikonStartMovieRecInCard: 0x920a,
+  NikonEndMovieRec: 0x920b,
 };
+
+export const NikonProp = { LiveViewImageSize: 0xd1ac }; // 1 QVGA, 2 VGA, 3 XGA
+
+// Nikon Z live view frames start with a big-endian header; the JPEG follows it.
+// Coordinates are in sensor pixels (e.g. 5568×3712 on the Z50II).
+export function parseLiveViewHeader(buf) {
+  const u = o => buf.readUInt16BE(o);
+  return {
+    jpeg: { w: u(8), h: u(10) },
+    sensor: { w: u(12), h: u(14) },
+    display: { w: u(16), h: u(18), x: u(20), y: u(22) },
+    af: { w: u(24), h: u(26), x: u(28), y: u(30) },
+  };
+}
 
 export const Resp = {
   0x2001: 'OK', 0x2002: 'General error', 0x2005: 'Operation not supported', 0x2019: 'Device busy',
-  0x201e: 'Session not open', 0x2003: 'Session not open', 0xa001: 'Hardware busy', 0xa002: 'Out of focus',
-  0xa003: 'Invalid status', 0xa004: 'Set property not supported', 0xa005: 'Wrong data type',
-  0xa008: 'Not in live view', 0xa00b: 'Not live view', 0xa00c: 'Change camera mode failed', 0x201d: 'Invalid parameter',
+  0x2003: 'Session not open', 0xa001: 'Hardware error', 0xa002: 'Out of focus',
+  0xa003: 'Change camera mode failed', 0xa004: 'Invalid status', 0xa005: 'Set property not supported',
+  0xa008: 'Shutter speed is Bulb', 0xa00a: 'Mode does not allow aperture change', 0xa00b: 'Not in live view', 0x201d: 'Invalid parameter',
   0x201c: 'Invalid device prop value', 0x200f: 'Access denied', 0x200c: 'Store full', 0x2013: 'Store not available',
 };
 export const respName = code => Resp[code] || `0x${code.toString(16)}`;

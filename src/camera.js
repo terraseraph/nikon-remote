@@ -5,8 +5,8 @@ import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync } from 'nod
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
 import {
-  Op, OK, respName, Reader, encodeValue,
-  parseDeviceInfo, parsePropDesc, parseObjectInfo, parseNikonEvents,
+  Op, OK, respName, encodeValue, NikonProp,
+  parseDeviceInfo, parsePropDesc, parseObjectInfo, parseNikonEvents, parseLiveViewHeader,
 } from './ptp.js';
 
 // Properties surfaced in the UI. Whether each is writable depends on the mode dial.
@@ -15,7 +15,8 @@ export const PROPS = {
   0x5005: 'wb', 0x500b: 'metering', 0x500a: 'focus', 0x5004: 'quality', 0x5003: 'size', 0x5001: 'battery',
 };
 
-const BUSY = new Set([0x2019, 0xa001]);
+const BUSY = new Set([0x2019]);
+const INVALID_STATUS = 0xa004;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export class Camera extends EventEmitter {
@@ -32,7 +33,9 @@ export class Camera extends EventEmitter {
     this.wantLiveView = true;  // user preference
     this.viewers = new Set();  // MJPEG responses
     this.capturing = false;
+    this.recordingSince = null; // ms timestamp while a movie is recording
     this.frame = null;
+    this.lvInfo = null;
     this.bridge = new Bridge();
     this.bridge.on('log', m => this.emit('log', m));
     this.bridge.on('exit', () => this.setDisconnected('Camera bridge stopped'));
@@ -43,7 +46,7 @@ export class Camera extends EventEmitter {
   state() {
     return {
       connected: this.connected, name: this.name, model: this.info?.model, liveView: this.liveView,
-      wantLiveView: this.wantLiveView, capturing: this.capturing, props: this.props, error: this.error || null,
+      wantLiveView: this.wantLiveView, capturing: this.capturing, recordingSince: this.recordingSince, props: this.props, error: this.error || null,
     };
   }
 
@@ -51,7 +54,7 @@ export class Camera extends EventEmitter {
 
   setDisconnected(error) {
     if (!this.connected && this.error === error) return;
-    this.connected = false; this.liveView = false; this.error = error;
+    this.connected = false; this.liveView = false; this.recordingSince = null; this.error = error;
     this.emitState();
   }
 
@@ -94,7 +97,7 @@ export class Camera extends EventEmitter {
         }
         const streaming = this.wantLiveView && this.viewers.size > 0;
         if (streaming && !this.liveView) await this.startLiveView();
-        if (!streaming && this.liveView) await this.stopLiveView();
+        if (!streaming && this.liveView && !this.recordingSince) await this.stopLiveView();
         if (this.liveView && !this.capturing) await this.pumpFrame();
         if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.pollEvents(); }
         await sleep(this.liveView ? 30 : 150);
@@ -121,6 +124,8 @@ export class Camera extends EventEmitter {
     const { code } = await this.bridge.send(Op.NikonStartLiveView);
     if (code !== OK && !BUSY.has(code)) { this.emit('log', `Live view: ${respName(code)}`); this.wantLiveView = false; return this.emitState(); }
     await this.waitReady();
+    // Prefer the largest live view frames (1024px on the Z50II); older bodies may not support it.
+    await this.bridge.send(Op.SetDevicePropValue, [NikonProp.LiveViewImageSize], { dir: 'write', data: encodeValue(2, 3) }).catch(() => {});
     this.liveView = true;
     this.emitState();
   }
@@ -138,12 +143,57 @@ export class Camera extends EventEmitter {
 
   async pumpFrame() {
     const res = await this.bridge.send(Op.NikonGetLiveViewImage, [], { dir: 'read' });
-    if (res.code === 0xa00b || res.code === 0xa008) { this.liveView = false; return; } // camera dropped live view
+    if (res.code === 0xa00b) { this.liveView = false; return; } // camera dropped live view
     if (res.code !== OK || !res.data) return;
     const soi = res.data.indexOf(Buffer.from([0xff, 0xd8]));
     if (soi < 0) return;
+    if (soi >= 32) this.lvInfo = parseLiveViewHeader(res.data);
     this.frame = res.data.subarray(soi);
-    for (const viewer of this.viewers) writeFrame(viewer, this.frame);
+    this.frameMeta = this.afBox();
+    for (const viewer of this.viewers) writeFrame(viewer, this.frame, this.frameMeta);
+  }
+
+  // Focus box as fractions of the visible live view area, for drawing over the image.
+  afBox() {
+    const i = this.lvInfo;
+    if (!i?.display.w || !i.af.w) return null;
+    const left = i.display.x - i.display.w / 2, top = i.display.y - i.display.h / 2;
+    const r = n => Math.round(n * 1e4) / 1e4;
+    return {
+      x: r((i.af.x - i.af.w / 2 - left) / i.display.w), y: r((i.af.y - i.af.h / 2 - top) / i.display.h),
+      w: r(i.af.w / i.display.w), h: r(i.af.h / i.display.h),
+    };
+  }
+
+  // Move the AF point to a spot given as fractions (0–1) of the live view, then optionally focus.
+  async setFocusPoint(fx, fy, { focus = true } = {}) {
+    const i = this.lvInfo;
+    if (!this.liveView || !i) throw new Error('Tap-to-focus needs live view');
+    const clamp = (v, lo, hi) => Math.round(Math.max(lo, Math.min(hi, v)));
+    const x = clamp(i.display.x - i.display.w / 2 + fx * i.display.w, 0, i.sensor.w - 1);
+    const y = clamp(i.display.y - i.display.h / 2 + fy * i.display.h, 0, i.sensor.h - 1);
+    const { code } = await this.bridge.send(Op.NikonChangeAfArea, [x, y]);
+    if (code !== OK) throw new Error('Focus point: ' + respName(code));
+    return { focus: focus ? await this.autofocus() : null };
+  }
+
+  async startMovie() {
+    if (!this.connected) throw new Error('Camera not connected');
+    if (this.recordingSince) return;
+    if (!this.liveView) await this.startLiveView();
+    const { code } = await this.bridge.send(Op.NikonStartMovieRecInCard);
+    if (code === INVALID_STATUS) throw new Error('Camera refused to record: flip the photo/video switch to video');
+    if (code !== OK) throw new Error('Record: ' + respName(code));
+    this.recordingSince = Date.now();
+    this.emitState();
+  }
+
+  async stopMovie() {
+    if (!this.recordingSince) return;
+    const { code } = await this.bridge.send(Op.NikonEndMovieRec);
+    this.recordingSince = null;
+    this.emitState();
+    if (code !== OK) throw new Error('Stop recording: ' + respName(code));
   }
 
   addViewer(res) {
@@ -152,7 +202,7 @@ export class Camera extends EventEmitter {
       'Cache-Control': 'no-store', Connection: 'close',
     });
     this.viewers.add(res);
-    if (this.frame) writeFrame(res, this.frame);
+    if (this.frame) writeFrame(res, this.frame, this.frameMeta);
     res.on('close', () => this.viewers.delete(res));
   }
 
@@ -208,6 +258,7 @@ export class Camera extends EventEmitter {
   async shoot({ af = false } = {}) {
     if (!this.connected) throw new Error('Camera not connected');
     if (this.capturing) throw new Error('Already capturing');
+    if (this.recordingSince) throw new Error('Stop recording before taking a photo');
     this.capturing = true;
     this.emitState();
     try {
@@ -265,15 +316,16 @@ export class Camera extends EventEmitter {
 function photoEntry(day, file, size) {
   const isJpeg = /\.jpe?g$/i.test(file);
   return {
-    name: file, day, size,
+    name: file, day, size, video: /\.(mov|mp4)$/i.test(file),
     url: `/captures/${day}/${encodeURIComponent(file)}`,
     thumb: `/captures/.thumbs/${day}_${encodeURIComponent(file)}.jpg`,
     preview: isJpeg ? `/captures/${day}/${encodeURIComponent(file)}` : `/captures/.thumbs/${day}_${encodeURIComponent(file)}.jpg`,
   };
 }
 
-function writeFrame(res, jpeg) {
-  res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`);
+function writeFrame(res, jpeg, meta) {
+  const af = meta ? `X-AF: ${meta.x},${meta.y},${meta.w},${meta.h}\r\n` : '';
+  res.write(`--frame\r\nContent-Type: image/jpeg\r\n${af}Content-Length: ${jpeg.length}\r\n\r\n`);
   res.write(jpeg);
   res.write('\r\n');
 }

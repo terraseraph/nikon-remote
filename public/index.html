@@ -15,8 +15,11 @@
     <span class="badge listening hidden" id="voiceBadge">● Listening</span>
     <span class="badge listening hidden" id="gestureBadge">✋ Gestures</span>
     <span class="badge listening hidden" id="clapBadge">👏 Clap</span>
+    <span class="badge rec hidden" id="recBadge">● REC 0:00</span>
   </div>
   <div class="top-actions">
+    <button class="ghost hidden" id="phoneBtn" title="Use your phone as the remote">📱 Phone</button>
+    <button class="ghost" id="zoomBtn" title="Magnify around the focus point (Z)">Zoom 1×</button>
     <button class="ghost" id="gridBtn" title="Rule-of-thirds grid (G)">Grid</button>
     <button class="ghost" id="lvBtn" title="Toggle live view (L)">Live view</button>
     <button class="ghost" id="reconnectBtn">Reconnect</button>
@@ -25,9 +28,13 @@
 
 <main class="layout">
   <section class="stage" id="stage">
-    <canvas id="lv"></canvas>
+    <div class="viewport" id="viewport" title="Tap to focus here">
+      <canvas id="lv"></canvas>
+      <div class="grid-overlay hidden" id="grid"></div>
+      <div class="focus-box hidden" id="focusBox"></div>
+      <div class="tap-ring hidden" id="tapRing"></div>
+    </div>
     <div class="placeholder" id="lvPlaceholder">Live view off</div>
-    <div class="grid-overlay hidden" id="grid"></div>
     <div class="countdown hidden" id="countdown"></div>
     <div class="flash" id="flash"></div>
     <div class="gesture-hud hidden" id="gestureHud">
@@ -54,6 +61,10 @@
         <button id="afBtn" class="secondary">Focus (F)</button>
         <button id="cancelBtn" class="secondary">Cancel (Esc)</button>
       </div>
+      <div class="row">
+        <button id="recBtn" class="record"><span class="rec-dot"></span><span id="recLabel">Record video (R)</span></button>
+      </div>
+      <p class="hint">Tap the live view to focus there.</p>
     </section>
 
     <section class="card">
@@ -64,6 +75,7 @@
 
     <section class="card">
       <h2>Triggers</h2>
+      <p class="hint hidden" id="secureHint">Voice, clap and webcam gestures need the microphone/camera, which phones only allow over https. Use them on the laptop — gestures watching the Nikon's live view still work here.</p>
       <div class="trigger">
         <label class="switch"><input type="checkbox" id="voiceToggle"><span></span> Voice commands</label>
         <details><summary>What can I say?</summary>
@@ -74,6 +86,8 @@
             <li><b>“focus”</b></li>
             <li><b>“brighter”</b> / “darker” (exposure comp)</li>
             <li><b>“ISO up”</b> / “ISO down” / “ISO 800”</li>
+            <li><b>“start recording”</b> / “action” · <b>“stop recording”</b> / “cut”</li>
+            <li><b>“zoom in”</b> / “zoom out”</li>
             <li><b>“live view on/off”</b>, “start/stop time-lapse”</li>
             <li><b>“stop”</b> / “cancel”</li>
           </ul>
@@ -112,8 +126,17 @@
   <div class="strip" id="strip"></div>
 </footer>
 
+<dialog id="phoneDialog" class="phone-dialog">
+  <h2>Use your phone as the remote</h2>
+  <p>Connect your phone to the <b>same Wi-Fi</b> as this laptop, then scan:</p>
+  <div id="qrList"></div>
+  <p class="hint">The code includes a private access key — anyone who scans it can control the camera, so don't share it. If the page won't load on the phone, Windows Firewall may be blocking Node: allow it on <b>Private</b> networks.</p>
+  <div class="viewer-bar"><span></span><button id="phoneClose" class="ghost">Close</button></div>
+</dialog>
+
 <dialog id="viewer">
   <img id="viewerImg" alt="">
+  <video id="viewerVideo" controls class="hidden"></video>
   <div class="viewer-bar"><span id="viewerName"></span><a id="viewerDownload" download>Download</a><button id="viewerClose" class="ghost">Close</button></div>
 </dialog>
 
