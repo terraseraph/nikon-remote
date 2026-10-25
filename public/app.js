@@ -12,9 +12,9 @@ let state = { connected: false, props: {} };
 const liveView = new LiveView($('lv'), { pull: location.protocol === 'https:', onFrame:() => { fitViewport(); drawFocusBox(); } });
 
 // ---------- API ----------
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+async function api(path, body, { signal } = {}) {
+  const res = await fetch(path, body === undefined ? { signal } : {
+    signal, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
@@ -514,7 +514,7 @@ for (const b of $('tabs').querySelectorAll('button')) b.onclick = () => showTab(
 $('advToggle').onclick = () => toggleAdv();
 $('advClose').onclick = () => toggleAdv(false);
 $('expoMore').onclick = () => (advOpen && tab === 'exposure' ? toggleAdv(false) : toggleAdv(true, 'exposure'));
-$('scrim').onclick = () => toggleAdv(false);
+$('scrim').onclick = () => { toggleAdv(false); toggleAssist(false); };
 
 // On a phone in portrait the drawer is a bottom sheet: drag its header down to dismiss it.
 const sheetMode = matchMedia('(max-width: 820px) and (min-height: 501px)');
@@ -615,8 +615,9 @@ function renderRecording() {
 
 // ---------- shot assist ----------
 // Lives in the exposure bar: pick a scene (and conditions) or describe it, and the suggested
-// values show on the exposure chips with one Apply. Settings the mode dial locks are queued and
-// set as soon as the camera reports them writable again.
+// values show on the exposure chips with one Apply. On a phone in portrait it is a bottom sheet
+// that lists the changes itself, since the chips are too narrow to show them. Settings the mode
+// dial locks are queued and set as soon as the camera reports them writable again.
 const SCENES = [['boudoir', 'Low-light boudoir'], ['portrait', 'Portrait'], ['action', 'Action'], ['landscape', 'Landscape'],
   ['street', 'Street'], ['event', 'Indoor event'], ['night', 'Night'], ['product', 'Product']];
 const CONDITIONS = ['Handheld', 'Tripod', 'No flash', 'Moody', 'Bright and airy', 'Freeze motion', 'Motion blur'];
@@ -626,14 +627,20 @@ const assist = (() => {
   catch { return { scene: 'boudoir', mods: [], notes: '' }; }
 })();
 const saveAssist = () => { try { localStorage.assist = JSON.stringify(assist); } catch {} };
-let advice = null; // { summary, mode, tips, model, settings: [{ name, code, value, display, reason, status }] }
-let assistOpen = false, assistBusy = false, assistReady = true;
+let advice = null;         // { intent, scene, mode, tips, model, settings: [{ name, code, value, display, reason, status }] }
+let assistOpen = false, assistReady = true;
+let asking = null;         // AbortController while a request is out
+let formOpen = true;       // scene inputs shown; folded into a one-line recap once results arrive
 
 // status: 'pending' = suggested, not applied yet; 'queued' = accepted but locked by the dial; 'done'.
 const openSuggestion = name => advice?.settings.find(s => s.name === name && s.status !== 'done');
+const openSuggestions = () => advice?.settings.filter(s => s.status !== 'done') || [];
 const isLocked = s => !propsByName()[s.name]?.writable;
 const modeName = () => { const m = propsByName().mode; return m ? fmt('mode', m.value) : 'this'; };
+const sceneLabel = () => SCENES.find(([id]) => id === assist.scene)?.[1] || '';
+const modelLabel = () => $('advModel').selectedOptions[0]?.textContent || 'the model';
 const LOCK = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 function renderChipSuggestion(chip, p) {
   const s = openSuggestion(p.name);
@@ -665,23 +672,28 @@ function syncAdvice(by) {
       }
     }
   }
-  renderAssistBar();
+  renderApply();
   if (assistOpen) renderAssistOut();
 }
 
-function renderAssistBar() {
-  const open = advice?.settings.filter(s => s.status !== 'done') || [];
+// The same Apply appears in the bar (desktop) and in the panel (phone).
+function renderApply() {
+  const open = openSuggestions();
   const pending = open.filter(s => s.status === 'pending');
   const now = pending.filter(s => !isLocked(s)).length, later = open.length - now;
-  $('asBar').classList.toggle('hidden', !open.length);
-  $('asDot').classList.toggle('hidden', !open.length || assistOpen);
-  const btn = $('asApply');
-  btn.classList.toggle('waiting', !now);
-  btn.disabled = !pending.length;
-  btn.innerHTML = now
-    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Apply ${now}${later ? `<span class="later">+${later} locked</span>` : ''}`
+  const html = now
+    ? `${CHECK}Apply ${now}${later ? `<span class="later">+${later} locked</span>` : ''}`
     : `${LOCK}${pending.length ? 'Apply when unlocked' : `${later} waiting for the dial`}`;
-  btn.title = later ? `Locked in ${modeName()} mode: ${open.filter(isLocked).map(s => LABEL[s.name]).join(', ')}` : '';
+  const title = later ? `Locked in ${modeName()} mode: ${open.filter(isLocked).map(s => LABEL[s.name]).join(', ')}` : '';
+  for (const btn of [$('asApply'), $('asApplyPanel')]) {
+    if (btn.dataset.html !== html) { btn.dataset.html = html; btn.innerHTML = html; }
+    btn.classList.toggle('waiting', !now);
+    btn.disabled = !pending.length;
+    btn.title = title;
+  }
+  $('asBar').classList.toggle('hidden', !open.length);
+  $('asActions').classList.toggle('hidden', !open.length || !!asking);
+  $('asDot').classList.toggle('hidden', !open.length || assistOpen);
 }
 
 function renderAssistTags() {
@@ -702,25 +714,43 @@ function renderAssistTags() {
   }));
 }
 
+// With results showing, the inputs fold into one row ("Low-light boudoir · Handheld ✎").
+function renderForm() {
+  const folded = (!!advice || !!asking) && !formOpen;
+  $('asForm').classList.toggle('hidden', folded);
+  $('asRecap').classList.toggle('hidden', !folded);
+  $('asRecap').setAttribute('aria-expanded', !folded);
+  const notes = $('asNotes').value.trim();
+  $('asRecapText').textContent = [sceneLabel() || 'Any scene', ...assist.mods, notes && `“${notes}”`].filter(Boolean).join(' · ');
+  $('assist').classList.toggle('has-out', !!advice || !!asking);
+}
+
 function renderAssistOut() {
   const out = $('asOut');
-  out.classList.toggle('hidden', !advice);
-  if (!advice) return;
-  const open = advice.settings.filter(s => s.status !== 'done');
+  out.classList.toggle('hidden', !advice || !!asking);
+  if (!advice) { out.dataset.html = ''; return; }
+  const open = openSuggestions();
   const locked = open.filter(isLocked);
-  // Chips show their own suggestions; list only the ones that have no chip.
+  const by = propsByName();
+  // Lead with the changes. The list is what phones show; on wider screens the chips carry them.
+  const rows = open.map(s => {
+    const lk = isLocked(s), cur = by[s.name] ? fmt(s.name, by[s.name].value) : s.current;
+    return `<li class="${lk ? 'lk' : ''}"><span class="nm">${lk ? LOCK : ''}${esc(LABEL[s.name] || s.name)}</span>
+      <span class="ch"><span class="was">${esc(cur)}</span> → <b>${esc(s.display)}</b></span>
+      ${lk || s.reason ? `<span class="why">${lk ? `After you turn the dial to ${esc(advice.mode || 'M')}${s.reason ? ' · ' : ''}` : ''}${esc(s.reason || '')}</span>` : ''}</li>`;
+  }).join('');
   const offChip = open.filter(s => !CHIP_ROWS.includes(s.name));
   const they = locked.length > 1 ? 'they will' : 'it will';
+  const tips = advice.tips.length + (advice.scene ? 1 : 0);
   const html = `
-    <p class="as-sum">${esc(advice.summary)}</p>
+    ${rows ? `<ul class="as-list">${rows}</ul>` : ''}
+    ${advice.intent ? `<p class="as-sum">${esc(advice.intent)}</p>` : ''}
     ${offChip.length ? `<p class="as-also">Also: ${offChip.map(s => `${esc(LABEL[s.name] || s.name)} → <b>${esc(s.display)}</b>`).join(' · ')}</p>` : ''}
     ${locked.length ? `<p class="as-warn">${LOCK}<span>${locked.map(s => `${esc(LABEL[s.name])} ${esc(s.display)}`).join(', ')}
       can't be set in ${esc(modeName())} mode. Turn the dial to ${esc(advice.mode || 'M')} and ${they} be set${locked.every(s => s.status === 'queued') ? '' : ' after you press Apply'}.</span></p>` : ''}
     ${!open.length ? '<p class="as-also">The camera matches these suggestions.</p>' : ''}
-    <div class="as-foot">
-      ${advice.tips.length ? `<details class="as-tips"><summary>${advice.tips.length} tip${advice.tips.length > 1 ? 's' : ''}</summary><ul>${advice.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : '<span></span>'}
-      ${open.length ? '<button class="as-clear" data-act="discard">Discard</button>' : ''}
-    </div>`;
+    ${tips ? `<details class="as-tips"><summary>${advice.scene ? 'About the scene' : ''}${advice.scene && advice.tips.length ? ' and ' : ''}${advice.tips.length ? `${advice.tips.length} tip${advice.tips.length > 1 ? 's' : ''}` : ''}</summary>
+      ${advice.scene ? `<p>${esc(advice.scene)}</p>` : ''}${advice.tips.length ? `<ul>${advice.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}</details>` : ''}`;
   // Property events re-render often; only rebuild when the text changes, so open tips stay open.
   if (html === out.dataset.html) return;
   const tipsOpen = out.querySelector('.as-tips')?.open;
@@ -729,35 +759,56 @@ function renderAssistOut() {
   if (tipsOpen) out.querySelector('.as-tips')?.setAttribute('open', '');
 }
 
+function renderAssist() { renderForm(); renderAssistOut(); renderApply(); }
+
 function toggleAssist(open = !assistOpen) {
   if (open === assistOpen) return;
   assistOpen = open;
   $('assist').classList.toggle('hidden', !open);
+  $('app').classList.toggle('as-open', open);
   $('assistBtn').classList.toggle('active', open);
   $('assistBtn').setAttribute('aria-expanded', open);
   if (open && openChip) { openChip = null; renderProps(); }
-  if (open) { renderAssistTags(); renderAssistOut(); }
-  renderAssistBar();
+  if (open && advOpen && sheetMode.matches) toggleAdv(false);
+  if (open) { renderAssistTags(); renderAssist(); }
+  renderApply();
 }
+
+// The API reports no progress, so the steps follow the usual timing: the frame goes out at
+// once, the model takes a few seconds, and reading the answer is quick.
+function setStep(text) { $('asStep').textContent = text; }
 
 async function suggestSettings() {
   toggleAssist(true);
-  if (assistBusy) return;
+  if (asking) return;
   if (!assistReady) return toast('Add OPENROUTER_API_KEY to .env and restart to use shot assist', true);
-  assistBusy = true;
+  const ctl = asking = new AbortController();
+  formOpen = false;
   $('assist').classList.add('busy'); $('assistBtn').classList.add('busy');
-  $('asGo').textContent = 'Looking…';
+  $('asBusy').classList.remove('hidden');
+  setStep('Capturing frame…');
+  $('viewport').classList.remove('sending'); $('viewport').offsetWidth; $('viewport').classList.add('sending');
+  renderAssist();
+  const timer = setTimeout(() => setStep(`Asking ${modelLabel()}…`), 700);
   try {
     const notes = [...assist.mods, $('asNotes').value.trim()].filter(Boolean).join('; ');
-    const r = await api('/api/advise', { scene: assist.scene, notes, model: $('advModel').value });
+    const r = await api('/api/advise', { scene: assist.scene, notes, model: $('advModel').value }, { signal: ctl.signal });
+    clearTimeout(timer);
+    setStep('Reading settings…');
+    await sleep(350);
+    if (ctl.signal.aborted) return;
     advice = { ...r, settings: r.settings.map(s => ({ ...s, status: s.same ? 'done' : 'pending' })) };
-    renderProps();
-    renderAssistOut();
-  } catch (e) { toast(e.message, true); }
-  finally {
-    assistBusy = false;
+  } catch (e) {
+    if (e.name === 'AbortError') toast('Cancelled');
+    else toast(e.message, true);
+    if (!advice) formOpen = true;
+  } finally {
+    clearTimeout(timer);
+    if (asking === ctl) asking = null;
     $('assist').classList.remove('busy'); $('assistBtn').classList.remove('busy');
-    $('asGo').textContent = 'Suggest';
+    $('asBusy').classList.add('hidden');
+    renderProps();
+    renderAssist();
   }
 }
 
@@ -777,7 +828,7 @@ async function applyAdvice() {
   if (!queued.length && !failed.length) toggleAssist(false);
 }
 
-function discardAdvice() { advice = null; renderProps(); renderAssistOut(); }
+function discardAdvice() { advice = null; formOpen = true; renderProps(); renderAssist(); }
 
 // Like setProp, but throws so Apply can report each setting.
 async function setPropValue(name, v) {
@@ -791,14 +842,16 @@ async function setPropValue(name, v) {
 $('assistBtn').onclick = () => toggleAssist();
 $('asClose').onclick = () => toggleAssist(false);
 $('asGo').onclick = suggestSettings;
-$('asApply').onclick = applyAdvice;
-$('asDiscard').onclick = discardAdvice;
-$('asOut').addEventListener('click', e => { if (e.target.closest('[data-act="discard"]')) discardAdvice(); });
+$('asCancel').onclick = () => asking?.abort();
+$('asApply').onclick = $('asApplyPanel').onclick = applyAdvice;
+$('asDiscard').onclick = $('asDiscardPanel').onclick = discardAdvice;
+$('asRecap').onclick = () => { formOpen = true; renderAssistTags(); renderForm(); $('asNotes').focus({ preventScroll: true }); };
 $('asModel').onclick = () => { toggleAssist(false); toggleAdv(true, 'advisor'); };
 $('asNotes').value = assist.notes;
 $('asNotes').oninput = () => { assist.notes = $('asNotes').value; saveAssist(); };
 $('asNotes').onkeydown = e => { if (e.key === 'Enter') suggestSettings(); else if (e.key === 'Escape') toggleAssist(false); };
-const showModel = () => { const o = $('advModel').selectedOptions[0]; $('asModel').textContent = o ? o.textContent : 'No model'; };
+$('viewport').addEventListener('animationend', e => { if (e.animationName === 'sendFrame') $('viewport').classList.remove('sending'); });
+const showModel = () => { $('asModel').textContent = `Model: ${modelLabel()}`; };
 $('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} showModel(); };
 api('/api/advisor').then(c => {
   for (const m of c.models) $('advModel').add(new Option(m.label, m.id));
@@ -808,9 +861,34 @@ api('/api/advisor').then(c => {
   assistReady = false;
   $('advModel').disabled = true;
   $('asGo').disabled = true;
-  $('asModel').textContent = 'Not set up';
+  $('asModel').textContent = 'Not set up: add an API key';
   $('advHint').textContent = 'Add OPENROUTER_API_KEY=… to a .env file next to package.json and restart to enable shot assist.';
 }).catch(() => {});
+
+// On a phone in portrait the panel is a bottom sheet like the advanced one: drag it down to close.
+let asDrag = null;
+const asHead = $('assist').querySelector('.as-head');
+asHead.addEventListener('pointerdown', e => {
+  if (!sheetMode.matches || e.target.closest('button')) return;
+  asDrag = { y: e.clientY, t: performance.now(), dy: 0 };
+  asHead.setPointerCapture(e.pointerId);
+  $('assist').classList.add('dragging');
+});
+asHead.addEventListener('pointermove', e => {
+  if (!asDrag) return;
+  asDrag.dy = Math.max(0, e.clientY - asDrag.y);
+  $('assist').style.setProperty('--drag', `${asDrag.dy}px`);
+});
+const endAsDrag = () => {
+  if (!asDrag) return;
+  const fling = asDrag.dy / (performance.now() - asDrag.t) > 0.5;
+  $('assist').classList.remove('dragging');
+  $('assist').style.removeProperty('--drag');
+  if (asDrag.dy > 80 || (fling && asDrag.dy > 20)) toggleAssist(false);
+  asDrag = null;
+};
+asHead.addEventListener('pointerup', endAsDrag);
+asHead.addEventListener('pointercancel', endAsDrag);
 
 // ---------- phone remote ----------
 let qrLib;

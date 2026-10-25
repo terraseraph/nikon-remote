@@ -256,10 +256,13 @@ input[type=range] { accent-color: var(--accent); }
 /* ---------- shot assist: popover above the exposure bar ---------- */
 .assist { position: absolute; right: calc(var(--side) + 14px); bottom: calc(100% + 12px); width: min(470px, calc(100% - var(--side) - 28px)); max-height: min(70vh, 540px); overflow-y: auto; border-radius: 16px; background: rgba(18, 18, 22, .94); backdrop-filter: blur(16px); border: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 10px; animation: popIn .4s var(--spring); box-shadow: 0 20px 50px rgba(0, 0, 0, .5); z-index: 4; }
 @keyframes popIn { from { transform: translateY(14px) scale(.98); opacity: 0; } }
-.as-head { display: flex; align-items: center; gap: 8px; }
+.as-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .as-head b { font-size: 14px; }
-.as-model { margin-left: auto; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-.as-model:hover { color: var(--fg); border-color: #4a4a54; }
+.as-form { display: flex; flex-direction: column; gap: 10px; }
+.as-recap { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); text-align: left; font-size: 13px; animation: unfold .35s var(--glide); }
+.as-recap span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-recap svg { width: 16px; height: 16px; color: var(--muted); }
+.as-recap:hover { border-color: #4a4a54; }
 .as-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag { height: 36px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 13px; transition: background .2s, border-color .2s, color .2s, transform .15s; }
 .tag:active { transform: scale(.96); }
@@ -271,18 +274,47 @@ input[type=range] { accent-color: var(--accent); }
 .as-go { height: 44px; padding: 0 18px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; flex: none; }
 .as-go:disabled { opacity: .4; cursor: default; }
 .assist.busy .as-go { opacity: .7; pointer-events: none; }
+
+/* loading: named steps, a cancel, and a placeholder where the results will land */
+.as-busy { display: flex; flex-direction: column; gap: 10px; animation: unfold .3s var(--glide); }
+.as-step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.as-step #asStep { flex: 1; }
+.as-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(245, 196, 0, .25); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+.as-cancel, .as-quiet { min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); color: var(--muted); font-weight: 600; }
+.as-cancel:hover, .as-quiet:hover { color: var(--fg); border-color: #4a4a54; }
+.shimmer { display: flex; flex-direction: column; gap: 8px; }
+.shimmer i { height: 14px; border-radius: 7px; background: linear-gradient(90deg, var(--card) 0%, var(--card2) 40%, var(--card) 80%) 0 0 / 300% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+.shimmer i:nth-child(1) { width: 92%; }
+.shimmer i:nth-child(2) { width: 70%; }
+.shimmer i:nth-child(3) { width: 80%; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+/* the frame being sent: a quick accent sweep over the live view */
+.viewport.sending::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--accent); border-radius: 4px; background: rgba(245, 196, 0, .08); pointer-events: none; animation: sendFrame .9s var(--ease) forwards; }
+@keyframes sendFrame { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+
+/* results: the changes first, then one line on the intent */
 .as-out { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; animation: unfold .45s var(--glide); }
 .as-out p { margin: 0; }
+.as-list { display: none; list-style: none; margin: 0; padding: 0; flex-direction: column; }
+.as-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.as-list li:last-child { border-bottom: 0; }
+.as-list .nm { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.as-list .nm svg { width: 14px; height: 14px; }
+.as-list .ch { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+.as-list .ch b { color: var(--accent); font-size: 15px; }
+.as-list .why { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.as-list li.lk .nm, .as-list li.lk .ch b, .as-list li.lk .why { color: var(--warn); }
 .as-sum { font-size: 13.5px; }
 .as-also { color: var(--muted); font-size: 12.5px; }
 .as-also b { color: var(--accent); }
 .as-warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: rgba(255, 159, 28, .1); border: 1px solid rgba(255, 159, 28, .45); color: var(--warn); font-size: 12.5px; }
 .as-warn svg { width: 16px; height: 16px; margin-top: 1px; }
-.as-foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.as-clear { padding: 0 4px; color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; }
-.as-clear:hover { color: var(--fg); }
-.as-tips summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
-.as-tips ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+.as-tips summary { cursor: pointer; color: var(--muted); font-size: 12.5px; min-height: 32px; display: flex; align-items: center; }
+.as-tips p, .as-tips ul { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+.as-tips ul { padding-left: 18px; }
+.as-actions { display: none; gap: 8px; }
+.as-model { align-self: flex-start; padding: 2px 0; color: var(--muted); font-size: 12px; text-decoration: underline; text-decoration-color: rgba(157, 157, 170, .4); text-underline-offset: 3px; }
+.as-model:hover { color: var(--fg); }
 
 /* suggested values on the exposure chips: old value small, new value in the accent */
 .chip .vs { display: flex; align-items: baseline; gap: 5px; }
@@ -299,14 +331,15 @@ input[type=range] { accent-color: var(--accent); }
 
 /* one Apply for every suggestion, in the bar itself */
 .as-bar { display: flex; gap: 6px; flex: none; animation: popIn .4s var(--spring); }
-.as-apply { height: 44px; padding: 0 14px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.as-apply { height: 44px; padding: 0 14px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
 .as-apply svg { width: 18px; height: 18px; stroke-width: 2.4; }
 .as-apply .later { margin-left: 2px; padding: 2px 7px; border-radius: 999px; background: rgba(0, 0, 0, .2); font-size: 11.5px; font-weight: 600; }
 .as-apply.waiting { background: rgba(255, 159, 28, .1); border: 1px solid rgba(255, 159, 28, .5); color: var(--warn); font-weight: 600; }
 .as-apply.waiting svg { stroke-width: 1.8; }
 .as-apply:disabled { cursor: default; }
 .as-btn { position: relative; }
-.as-btn.busy svg { animation: spin 1.4s linear infinite; color: var(--accent); }
+.as-btn.busy { color: var(--accent); border-color: rgba(245, 196, 0, .6); animation: asPulse 1.2s ease-in-out infinite; }
+@keyframes asPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 196, 0, .45); } 50% { box-shadow: 0 0 0 7px rgba(245, 196, 0, 0); } }
 .as-dot { position: absolute; top: 7px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--card); }
 
 /* ---------- bottom exposure bar + value ruler ---------- */
@@ -400,16 +433,18 @@ dialog[open] { animation: dlg .35s var(--spring); }
   .chip .l { font-size: 9.5px; }
   .chip .v { font-size: 15px; }
   .ruler { width: calc(100% - 16px); bottom: calc(100% + 8px); padding: 6px; gap: 6px; }
+  /* Shot assist on phones: the chips are too narrow to show changes, so the panel lists them
+     and carries Apply; the bar Apply would only cover the chips. */
   .assist { left: 8px; right: 8px; width: auto; bottom: calc(100% + 8px); max-height: 62dvh; padding: 10px; gap: 8px; }
-  .as-tags { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -10px; padding: 0 10px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 24px), transparent); }
-  .tag { flex: none; height: 40px; }
-  .tag.sm { height: 36px; }
+  .as-tags { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -14px; padding: 0 14px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 48px), transparent); }
+  .tag, .tag.sm { flex: none; height: 44px; }
+  .as-bar { display: none; }
+  .as-list { display: flex; }
+  .as-also, .as-warn { display: none; }
+  .as-actions { display: flex; }
+  .as-actions .as-apply { flex: 1; height: 48px; }
   .chip.sug .n { font-size: 15px; }
   .chip.sug .v { font-size: 11px; }
-  /* Keep the chips readable: a compact Apply, and Discard lives in the popover. */
-  .as-apply { padding: 0 11px; gap: 4px; }
-  .as-apply .later, .as-x { display: none; }
-  .as-apply.waiting { max-width: 120px; white-space: normal; line-height: 1.1; font-size: 12px; text-align: left; }
   .rwin { height: 50px; }
   .tick { width: 72px; font-size: 14px; }
 
@@ -463,6 +498,17 @@ dialog[open] { animation: dlg .35s var(--spring); }
   .app.adv-open .adv { transform: translateY(var(--drag, 0px)); }
   .adv-head { position: relative; padding-top: 20px; cursor: grab; touch-action: none; user-select: none; }
   .adv-head::before { content: ""; position: absolute; top: 8px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: #4a4a54; }
+
+  /* shot assist becomes a bottom sheet like the advanced one, short until there are results */
+  .app.as-open .scrim { opacity: .5; pointer-events: auto; }
+  .assist { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 60dvh; z-index: 20; padding: 0 14px calc(14px + env(safe-area-inset-bottom)); gap: 10px;
+    border-radius: 22px 22px 0 0; border-bottom: 0; background: var(--panel); backdrop-filter: none; box-shadow: 0 -20px 60px rgba(0, 0, 0, .5);
+    transform: translateY(var(--drag, 0px)); transition: transform .5s var(--glide); animation: sheetUp .45s var(--glide); }
+  @keyframes sheetUp { from { transform: translateY(100%); } }
+  .assist.dragging { transition: none; }
+  .as-head { position: sticky; top: 0; z-index: 1; margin: 0 -14px; padding: 22px 14px 4px; background: var(--panel); cursor: grab; touch-action: none; user-select: none; }
+  .as-head::before { content: ""; position: absolute; top: 8px; left: 50%; width: 40px; height: 5px; margin-left: -20px; border-radius: 3px; background: #4a4a54; }
+  .as-actions { position: sticky; bottom: calc(-14px - env(safe-area-inset-bottom)); margin: 0 -14px calc(-14px - env(safe-area-inset-bottom)); padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--line); }
 }
 
 /* very short portrait screens: tighten the dock so the viewfinder keeps its room */

@@ -46,7 +46,7 @@ Suggest settings for the scene the photographer describes. Rules:
 - Settings marked "locked" can't be changed in the current mode; if a locked setting matters, recommend a mode in "mode" (M, A, S or P) and still give the value.
 - Keep the advice practical and specific to what you see in the frame (light, subject, background, motion, noise risk).
 Reply with JSON only, no prose around it:
-{"summary": "<one or two sentences on what you see and the approach>", "mode": "<M|A|S|P or empty>", "settings": {"<setting>": "<option>", ...}, "reasons": {"<setting>": "<short why>"}, "tips": ["<short tip>", ...]}`;
+{"intent": "<the approach in one short line, at most 12 words, e.g. 'Open up and lift ISO to keep it handheld'>", "scene": "<one or two sentences on the light and subject you see>", "mode": "<M|A|S|P or empty>", "settings": {"<setting>": "<option>", ...}, "reasons": {"<setting>": "<short why>"}, "tips": ["<short tip>", ...]}`;
 
 function describeSettings(props) {
   const lines = [];
@@ -140,7 +140,7 @@ export async function advise(camera, { scene, notes = '', model }) {
     });
   }
   return {
-    model: config.model, summary: reply.summary || '', mode: reply.mode || '',
+    model: config.model, intent: reply.intent || reply.summary || '', scene: reply.scene || '', mode: reply.mode || '',
     settings, tips: Array.isArray(reply.tips) ? reply.tips.slice(0, 6) : [],
   };
 }

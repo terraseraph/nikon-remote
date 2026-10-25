@@ -229,17 +229,30 @@
   <section class="assist hidden" id="assist" aria-label="Shot assist">
     <div class="as-head">
       <b>Shot assist</b>
-      <button class="as-model" id="asModel" title="Change the AI model"></button>
       <button class="close" id="asClose" aria-label="Close shot assist">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
     </div>
-    <div class="as-tags" id="asScenes" role="group" aria-label="Scene"></div>
-    <div class="as-tags" id="asMods" role="group" aria-label="Conditions"></div>
-    <div class="as-ask">
-      <input id="asNotes" placeholder="Describe the scene or the look you want" maxlength="300" aria-label="Scene description">
-      <button id="asGo" class="as-go">Suggest</button>
+    <button class="as-recap hidden" id="asRecap" aria-expanded="false" aria-controls="asForm" title="Change the scene">
+      <span id="asRecapText"></span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></svg></button>
+    <div class="as-form" id="asForm">
+      <div class="as-tags" id="asScenes" role="group" aria-label="Scene"></div>
+      <div class="as-tags" id="asMods" role="group" aria-label="Conditions"></div>
+      <div class="as-ask">
+        <input id="asNotes" placeholder="Describe the scene or the look you want" maxlength="300" aria-label="Scene description">
+        <button id="asGo" class="as-go">Suggest</button>
+      </div>
+    </div>
+    <div class="as-busy hidden" id="asBusy" role="status">
+      <div class="as-step"><span class="as-spin"></span><span id="asStep">Capturing frame…</span><button class="as-cancel" id="asCancel">Cancel</button></div>
+      <div class="shimmer"><i></i><i></i><i></i></div>
     </div>
     <div class="as-out hidden" id="asOut" aria-live="polite"></div>
+    <div class="as-actions hidden" id="asActions">
+      <button class="as-apply" id="asApplyPanel"></button>
+      <button class="as-quiet" id="asDiscardPanel">Discard</button>
+    </div>
+    <button class="as-model" id="asModel" title="Change the AI model"></button>
   </section>
   <div class="chips" id="chips" role="group" aria-label="Exposure"></div>
   <div class="as-bar hidden" id="asBar">
