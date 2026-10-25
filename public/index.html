@@ -121,6 +121,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="7" width="11" height="13" rx="2"/><path d="M5 16V6a2 2 0 0 1 2-2h8"/></svg><span class="sub mono" id="burstSub">×3</span></button>
       <button data-drive="timer" title="Self-timer — tap again to change the delay">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 1.5M10 2.5h4"/></svg><span class="sub mono" id="timerSub">3s</span></button>
+      <button data-drive="preset" title="Preset routine — tap again for the next one; edit them under More › Capture">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h9M5 12h6M5 18h9"/><path d="M15 9.5v5l4.5-2.5z"/></svg><span class="sub mono" id="presetSub">P1</span></button>
     </div>
     <button id="advToggle" class="sq adv-btn" title="Advanced controls (M)" aria-expanded="false" aria-controls="adv">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6"/></svg>More</button>
@@ -148,6 +150,11 @@
     </div>
 
     <div class="pane" data-pane="capture">
+      <span class="pcap">Presets</span>
+      <p class="hint ptip">Say <b>“preset two”</b> to run one, or <b>“use preset two”</b> to put it on the shutter, “shoot” and clap. Tap a number to do the same.</p>
+      <div class="presets" id="presetList"></div>
+      <button class="secondary wide" id="presetAdd">+ New preset</button>
+      <label class="opt">Chime just before each shot<input type="checkbox" id="chime" checked><span class="sw"></span></label>
       <span class="pcap">Burst count</span>
       <div class="seg" data-opt="burst" style="--n: 4"><span class="ind"></span>
         <button data-v="2">×2</button><button data-v="3">×3</button><button data-v="5">×5</button><button data-v="10">×10</button></div>

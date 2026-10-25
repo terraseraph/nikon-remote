@@ -23,6 +23,8 @@ const THUMBS = join(ROOT, '.cache', 'thumbs');
 const PORT = +process.env.PORT || 8765;
 const LAN = process.env.LAN !== '0'; // LAN=0 keeps the server reachable from this machine only
 const KEY_FILE = join(ROOT, '.remote-key');
+// Shooting presets live on the laptop so the phone and the laptop share the same list.
+const PRESETS_FILE = join(ROOT, 'presets.json');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -68,6 +70,37 @@ const json = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 };
+
+// A preset is a list of steps, each "wait, then take N shots this far apart", run `repeat` times
+// (0 = until cancelled). Clamped so a typo can't queue thousands of shots.
+const clamp = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
+function cleanPresets(list) {
+  if (!Array.isArray(list)) throw new Error('Presets must be a list');
+  return list.slice(0, 9).map((p, i) => ({
+    name: String(p?.name || `Preset ${i + 1}`).slice(0, 40),
+    repeat: Math.round(clamp(p?.repeat, 0, 999, 1)),
+    steps: (Array.isArray(p?.steps) && p.steps.length ? p.steps : [{}]).slice(0, 12).map(s => ({
+      wait: clamp(s?.wait, 0, 3600, 0),
+      shots: Math.round(clamp(s?.shots, 1, 50, 1)),
+      gap: clamp(s?.gap, 0, 600, 1),
+    })),
+  }));
+}
+const DEFAULT_PRESETS = cleanPresets([
+  { name: 'Single', steps: [{ wait: 0, shots: 1 }] },
+  { name: 'Every 3 s', repeat: 0, steps: [{ wait: 3, shots: 1 }] },
+  { name: '3 s, then 5 s', steps: [{ wait: 3, shots: 1 }, { wait: 5, shots: 1 }] },
+  { name: 'Burst + single', steps: [{ wait: 0, shots: 3, gap: 0.5 }, { wait: 3, shots: 1 }] },
+]);
+function loadPresets() {
+  try { return cleanPresets(JSON.parse(readFileSync(PRESETS_FILE, 'utf8'))); } catch { return DEFAULT_PRESETS; }
+}
+function savePresets(list) {
+  const clean = cleanPresets(list);
+  writeFileSync(PRESETS_FILE, JSON.stringify(clean, null, 2));
+  broadcast('presets', clean);
+  return clean;
+}
 
 async function body(req) {
   let s = '';
@@ -149,6 +182,8 @@ const routes = {
   'GET /api/advisor': () => ({ ...advisorConfig(), scenes: Object.keys(SCENES) }),
   'POST /api/advise': b => advise(camera, { scene: b.scene, notes: String(b.notes || '').slice(0, 500), model: b.model }),
   'POST /api/reconnect': () => camera.reconnect().then(() => camera.state()),
+  'GET /api/presets': () => loadPresets(),
+  'POST /api/presets': b => savePresets(b.presets),
 };
 
 const server = createServer(async (req, res) => {

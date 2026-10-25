@@ -1,7 +1,7 @@
 // Voice commands via the browser's Web Speech API (Chrome / Edge).
 // Note: those browsers send the audio to their own cloud speech service for recognition.
 
-const NUMBERS = { one: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fifteen: 15, twenty: 20, thirty: 30 };
+const NUMBERS = { one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fifteen: 15, twenty: 20, thirty: 30 };
 const num = w => (w == null ? NaN : /^\d+$/.test(w) ? +w : NUMBERS[w] ?? NaN);
 const N = '(\\d+|' + Object.keys(NUMBERS).join('|') + ')';
 
@@ -9,6 +9,9 @@ const N = '(\\d+|' + Object.keys(NUMBERS).join('|') + ')';
 const COMMANDS = [
   [/\b(start|begin) (a |the )?time ?lapse\b/, () => ['Start time-lapse', a => a.timelapse(true)]],
   [/\b(stop|end) (the )?time ?lapse\b/, () => ['Stop time-lapse', a => a.timelapse(false)]],
+  // "pre-set" arrives as "pre set" once dashes are stripped.
+  [new RegExp(`\\b(?:use|select|pick|choose|set) pre ?set ${N}\\b`), m => [`Use preset ${num(m[1])}`, a => a.pickPreset(num(m[1]))]],
+  [new RegExp(`\\bpre ?set (?:number )?${N}\\b`), m => [`Preset ${num(m[1])}`, a => a.preset(num(m[1]))]],
   [/\b(stop|end|finish) (the )?(recording|video|filming)\b|\bcut\b/, () => ['Stop recording', a => a.record(false)]],
   [/\b(start )?(recording|record( a)? video|filming|action)\b/, () => ['Start recording', a => a.record(true)]],
   [/\b(apply|use) (the |those |these )?(suggested )?(settings|suggestions)\b/, () => ['Apply suggestions', a => a.applyAdvice()]],
@@ -29,13 +32,15 @@ const COMMANDS = [
   [/\b(brighter|lighter|more exposure)\b/, () => ['Brighter (+EV)', a => a.brighter()]],
   [/\b(darker|less exposure)\b/, () => ['Darker (−EV)', a => a.darker()]],
   [/\b(focus|auto ?focus)\b/, () => ['Focus', a => a.focus()]],
-  [/\b(shoot|capture|snap|cheese|fire|click|take (a |the )?(photo|picture|pic|shot))\b/, () => ['Shoot', a => a.shoot()]],
+  // Does what the shutter is set to: one shot, burst, timer or the chosen preset.
+  [/\b(shoot|capture|snap|cheese|fire|click|take (a |the )?(photo|picture|pic|shot))\b/, () => ['Shoot', a => a.sequence()]],
 ];
 
 // What the on-screen guide and the Triggers tab list. Keep in step with COMMANDS above;
 // `key` ones are the short list shown over the live view.
 export const VOICE_HELP = [
-  { say: 'shoot', also: ['capture', 'cheese', 'take a picture'], does: 'Take a photo', key: true },
+  { say: 'shoot', also: ['capture', 'cheese', 'take a picture'], does: 'Shoot as the shutter is set', key: true },
+  { say: 'preset two', also: ['use preset two'], does: 'Run / choose a preset', key: true },
   { say: 'timer five', also: ['in ten seconds'], does: 'Self-timer', key: true },
   { say: 'burst three', also: ['five shots'], does: 'Several shots', key: true },
   { say: 'focus', does: 'Autofocus', key: true },

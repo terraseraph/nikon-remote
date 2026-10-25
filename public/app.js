@@ -66,6 +66,23 @@ function beep(freq = 880, ms = 90) {
   o.start(); o.stop(audio.currentTime + ms / 1000);
 }
 
+// A two-note "ready" chime just before the shutter, so people in the shot know when to hold still.
+function chime() {
+  clap.quiet(1500);
+  if (!$('chime').checked) return;
+  audio ??= new AudioContext();
+  audio.resume?.();
+  const t = audio.currentTime;
+  for (const [freq, at] of [[1046.5, 0], [1568, 0.16]]) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audio.destination);
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(0.22, t + at + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t + at + 0.6);
+    o.start(t + at); o.stop(t + at + 0.62);
+  }
+}
+
 function flash() {
   const f = $('flash');
   f.classList.add('on');
@@ -76,14 +93,19 @@ function flash() {
 // The shutter does what the mode says: photo runs the drive sequence, video toggles recording,
 // lapse toggles the time-lapse. Drive numbers live in the advanced Capture tab.
 let captureMode = 'photo';
-const drive = { mode: 'single', burst: 3, gap: 1, timer: 3, timerBurst: false, tlEvery: 5, tlFrames: 30 };
+const drive = { mode: 'single', burst: 3, gap: 1, timer: 3, timerBurst: false, tlEvery: 5, tlFrames: 30, preset: 0 };
 try { Object.assign(drive, JSON.parse(localStorage.drive || '{}')); } catch {}
 const saveDrive = () => { try { localStorage.drive = JSON.stringify(drive); } catch {} };
 const BURSTS = [2, 3, 5, 10], TIMERS = [2, 3, 5, 10];
+let presets = []; // shared with every device through the server; see "presets" below
 
+// Every way of shooting is a list of steps, "wait, then take N shots this far apart", run
+// `repeat` times (0 = until cancelled). The drive modes are one-step versions of a preset.
 function driveSequence() {
+  if (drive.mode === 'preset' && presets[drive.preset]) return presetSequence(presets[drive.preset]);
   const timed = drive.mode === 'timer';
-  return { delay: timed ? drive.timer : 0, count: drive.mode === 'burst' || (timed && drive.timerBurst) ? drive.burst : 1, gap: drive.gap };
+  const shots = drive.mode === 'burst' || (timed && drive.timerBurst) ? drive.burst : 1;
+  return { steps: [{ wait: timed ? drive.timer : 0, shots, gap: drive.gap }] };
 }
 
 function primaryAction() {
@@ -111,6 +133,7 @@ function renderDrive() {
   pickSeg($('driveSeg'), $('driveSeg').querySelector(`[data-drive="${drive.mode}"]`));
   $('burstSub').textContent = `×${drive.burst}`;
   $('timerSub').textContent = `${drive.timer}s`;
+  $('presetSub').textContent = `P${drive.preset + 1}`;
   for (const seg of document.querySelectorAll('.seg[data-opt]')) {
     const btn = [...seg.querySelectorAll('button')].find(b => +b.dataset.v === drive[seg.dataset.opt]);
     if (btn) pickSeg(seg, btn);
@@ -131,7 +154,8 @@ function renderShutter() {
     captureMode === 'video' ? (rec ? 'Stop' : 'Record') :
     captureMode === 'lapse' ? (timelapse ? 'Stop lapse' : 'Start lapse') :
     drive.mode === 'burst' ? `Burst ×${drive.burst}` :
-    drive.mode === 'timer' ? `Timer ${drive.timer}s${drive.timerBurst ? ` ×${drive.burst}` : ''}` : 'Shoot';
+    drive.mode === 'timer' ? `Timer ${drive.timer}s${drive.timerBurst ? ` ×${drive.burst}` : ''}` :
+    drive.mode === 'preset' ? presets[drive.preset]?.name || 'Preset' : 'Shoot';
   $('shutterLabel').textContent = label;
   s.setAttribute('aria-label', label);
   s.title = `${label} (Space)`;
@@ -150,14 +174,27 @@ function seqStatus(text) {
   s.classList.toggle('hidden', !text);
 }
 
-async function countdown(secs, token) {
+// Waits `secs` before a shot: waits of 2 s or more count down on screen with a beep a second,
+// and with `ring` the ready chime plays at the end. The chime comes out of the wait rather than
+// adding to it, so "every 3 seconds" stays every 3 seconds.
+const CHIME_LEAD = 0.7;
+async function countdown(secs, token, ring = false) {
   const el = $('countdown');
-  for (let s = secs; s > 0; s--) {
-    if (token.cancelled) break;
-    el.textContent = s; el.classList.remove('hidden');
-    el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
-    beep(s <= 3 ? 1100 : 880);
-    await sleep(1000);
+  ring &&= $('chime').checked;
+  const end = performance.now() + Math.max(secs, ring ? CHIME_LEAD : 0) * 1000;
+  let shown = 0, chimed = !ring;
+  while (!token.cancelled) {
+    const left = (end - performance.now()) / 1000;
+    if (left <= 0) break;
+    if (!chimed && left <= CHIME_LEAD) { chimed = true; chime(); }
+    const s = Math.ceil(left);
+    if (secs >= 2 && s !== shown) {
+      shown = s;
+      el.textContent = s; el.classList.remove('hidden');
+      el.style.animation = 'none'; el.offsetHeight; el.style.animation = '';
+      if (!(ring && s === 1)) beep(s <= 3 ? 1100 : 880); // the chime stands in for the last beep
+    }
+    await sleep(Math.min(50, left * 1000));
   }
   el.classList.add('hidden');
 }
@@ -177,16 +214,24 @@ async function shootOnce() {
   } catch (e) { toast(e.message, true); return false; }
 }
 
-async function runSequence({ delay = driveSequence().delay, count = driveSequence().count, gap = drive.gap, label } = {}) {
+async function runSequence({ steps, repeat = 1, label = 'Burst' } = driveSequence()) {
   if (seq) return toast('Already shooting — say “cancel” to stop');
   const token = (seq = { cancelled: false });
   renderShutter();
+  const total = repeat ? repeat * steps.reduce((n, s) => n + s.shots, 0) : 0;
+  let taken = 0;
   try {
-    if (delay) await countdown(delay, token);
-    for (let i = 1; i <= count && !token.cancelled; i++) {
-      if (count > 1) seqStatus(`${label || 'Burst'} ${i}/${count}`);
-      await shootOnce();
-      if (i < count && !token.cancelled) await sleep(gap * 1000);
+    for (let round = 1; (!repeat || round <= repeat) && !token.cancelled; round++) {
+      for (const s of steps) {
+        for (let i = 1; i <= s.shots && !token.cancelled; i++) {
+          // Chime before each step's first shot, and before every shot unless it's a quick burst.
+          await countdown(i === 1 ? s.wait : s.gap, token, i === 1 || s.gap >= 1);
+          if (token.cancelled) break;
+          taken++;
+          if (total !== 1) seqStatus(`${label} ${taken}${total ? `/${total}` : ''}`);
+          await shootOnce();
+        }
+      }
     }
   } finally {
     seq = null; seqStatus('');
@@ -210,6 +255,8 @@ async function startTimelapse() {
   for (let i = 1; i <= frames && !token.cancelled; i++) {
     const t0 = Date.now();
     seqStatus(`Time-lapse ${i}${frames === Infinity ? '' : `/${frames}`}`);
+    if ($('chime').checked && every >= 2) { chime(); await sleep(CHIME_LEAD * 1000); }
+    if (token.cancelled) break;
     await shootOnce();
     while (!token.cancelled && Date.now() - t0 < every * 1000) await sleep(100);
   }
@@ -220,6 +267,131 @@ function stopTimelapse() {
   timelapse = null; seqStatus('');
   renderShutter();
 }
+
+// ---------- presets ----------
+// Numbered shooting routines ("preset two" by voice). Edits save to the server after a pause
+// and come back to every open device as a 'presets' event.
+const presetSequence = p => ({ steps: p.steps, repeat: p.repeat, label: p.name });
+const secs = s => (s >= 60 && s % 60 === 0 ? `${s / 60} min` : `${s} s`);
+function describePreset(p) {
+  const steps = p.steps.map(s => {
+    const shots = s.shots === 1 ? '1 shot' : `${s.shots} shots ${secs(s.gap)} apart`;
+    return s.wait ? `wait ${secs(s.wait)}, ${shots}` : shots;
+  }).join(' → ');
+  return `${steps}${p.repeat === 0 ? ', repeat until cancelled' : p.repeat > 1 ? `, ×${p.repeat}` : ''}`;
+}
+
+function pickPreset(i) {
+  if (seq || timelapse) return toast('Finish the current shots first', true);
+  drive.preset = i; drive.mode = 'preset';
+  if (captureMode !== 'photo') setMode('photo');
+  saveDrive(); renderDrive(); renderPresets();
+  toast(`Preset ${i + 1}: ${presets[i].name}`);
+}
+
+let presetSave;
+function savePresets() {
+  clearTimeout(presetSave);
+  presetSave = setTimeout(() => api('/api/presets', { presets }).catch(e => toast(e.message, true)), 500);
+}
+function setPresets(list) {
+  presets = list;
+  if (drive.preset >= presets.length) drive.preset = 0;
+  renderDrive();
+  // Don't rebuild the editor under someone typing in it.
+  if (!$('presetList').contains(document.activeElement)) renderPresets();
+}
+
+const REPEATS = [[1, 'Once'], [2, '×2'], [3, '×3'], [5, '×5'], [10, '×10'], [0, 'Until cancelled']];
+function numInput(value, { min = 0, max, step = 1, label, onset }) {
+  const i = document.createElement('input');
+  Object.assign(i, { type: 'number', className: 'num mono', min, step, value, inputMode: 'decimal' });
+  if (max != null) i.max = max;
+  i.setAttribute('aria-label', label);
+  i.onchange = () => { const v = Math.max(min, Math.min(max ?? Infinity, +i.value || 0)); i.value = v; onset(v); };
+  return i;
+}
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+function renderPresets() {
+  $('presetAdd').disabled = presets.length >= 9;
+  $('presetList').replaceChildren(...presets.map((p, pi) => {
+    const changed = () => { sum.textContent = describePreset(p); savePresets(); renderShutter(); };
+    const card = el('div', 'preset');
+    card.classList.toggle('on', drive.mode === 'preset' && drive.preset === pi);
+
+    const head = el('div', 'phead');
+    const pick = el('button', 'pnum mono', pi + 1);
+    pick.title = `Use for the shutter, “shoot” and clap (or say “use preset ${pi + 1}”)`;
+    pick.onclick = () => pickPreset(pi);
+    const name = el('input', 'pname');
+    name.value = p.name; name.maxLength = 40; name.setAttribute('aria-label', `Preset ${pi + 1} name`);
+    name.oninput = () => { p.name = name.value || `Preset ${pi + 1}`; changed(); };
+    const run = el('button', 'pbtn run');
+    run.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>';
+    run.title = `Run now (say “preset ${pi + 1}”)`; run.setAttribute('aria-label', `Run preset ${pi + 1}`);
+    run.onclick = () => actions.preset(pi + 1);
+    const del = el('button', 'pbtn');
+    del.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>';
+    del.title = 'Delete preset'; del.setAttribute('aria-label', `Delete preset ${pi + 1}`);
+    del.onclick = () => {
+      presets.splice(pi, 1);
+      if (drive.preset >= pi && drive.preset > 0) drive.preset--;
+      saveDrive(); savePresets(); renderDrive(); renderPresets();
+    };
+    head.append(pick, name, run, del);
+
+    const steps = el('ol', 'psteps');
+    p.steps.forEach((s, si) => {
+      const row = el('li', 'pstep');
+      const gap = el('span', 'pgap');
+      const showGap = () => gap.classList.toggle('hidden', s.shots < 2);
+      gap.append(numInput(s.gap, { step: 0.5, max: 600, label: 'Seconds between shots', onset: v => { s.gap = v; changed(); } }), el('span', null, 's apart'));
+      row.append(
+        el('span', null, si ? 'then wait' : 'Wait'),
+        numInput(s.wait, { step: 0.5, max: 3600, label: 'Seconds to wait', onset: v => { s.wait = v; changed(); } }),
+        el('span', null, 's, take'),
+        numInput(s.shots, { min: 1, max: 50, label: 'Shots', onset: v => { s.shots = v; showGap(); changed(); } }),
+        gap,
+      );
+      showGap();
+      if (p.steps.length > 1) {
+        const rm = el('button', 'pbtn sm');
+        rm.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+        rm.setAttribute('aria-label', `Remove step ${si + 1}`);
+        rm.onclick = () => { p.steps.splice(si, 1); savePresets(); renderPresets(); };
+        row.append(rm);
+      }
+      steps.append(row);
+    });
+
+    const foot = el('div', 'pfoot');
+    const add = el('button', 'pbtn text', '+ Step');
+    add.disabled = p.steps.length >= 12;
+    add.onclick = () => { p.steps.push({ wait: 3, shots: 1, gap: 1 }); savePresets(); renderPresets(); };
+    const rep = document.createElement('select');
+    rep.setAttribute('aria-label', 'Repeat');
+    rep.append(...REPEATS.map(([v, t]) => new Option(t, v)));
+    if (!REPEATS.some(([v]) => v === p.repeat)) rep.add(new Option(`×${p.repeat}`, p.repeat));
+    rep.value = p.repeat;
+    rep.onchange = () => { p.repeat = +rep.value; changed(); };
+    const repLabel = el('label', 'prep', 'Repeat ');
+    repLabel.append(rep);
+    foot.append(add, repLabel);
+
+    const sum = el('p', 'psum', describePreset(p));
+    card.append(head, steps, foot, sum);
+    return card;
+  }));
+}
+
+$('presetAdd').onclick = () => {
+  presets.push({ name: `Preset ${presets.length + 1}`, repeat: 1, steps: [{ wait: 0, shots: 1, gap: 1 }] });
+  savePresets(); renderPresets();
+  $('presetList').lastElementChild?.querySelector('.pname').select();
+};
+events.addEventListener('presets', e => setPresets(JSON.parse(e.data)));
+api('/api/presets').then(setPresets).catch(() => {});
 
 // ---------- actions (shared by buttons, keys, voice, gestures, clap) ----------
 const PROP = { aperture: 0x5007, shutter: 0xd100, iso: 0x500f, ev: 0x5010 };
@@ -232,11 +404,13 @@ async function step(name, delta) {
 }
 
 export const actions = {
-  shoot: () => runSequence({ delay: 0, count: 1 }),
+  shoot: () => runSequence({ steps: [{ wait: 0, shots: 1 }] }),
   sequence: () => runSequence(),
-  timer: n => runSequence({ delay: n, count: 1 }),
-  burst: n => runSequence({ delay: 0, count: n, gap: 0.5 }),
-  timerBurst: n => runSequence({ delay: 3, count: n, gap: 1 }),
+  timer: n => runSequence({ steps: [{ wait: n, shots: 1 }] }),
+  burst: n => runSequence({ steps: [{ wait: 0, shots: n, gap: 0.5 }] }),
+  timerBurst: n => runSequence({ steps: [{ wait: 3, shots: n, gap: 1 }] }),
+  preset: n => (presets[n - 1] ? runSequence(presetSequence(presets[n - 1])) : toast(`There is no preset ${n}`, true)),
+  pickPreset: n => (presets[n - 1] ? pickPreset(n - 1) : toast(`There is no preset ${n}`, true)),
   focus: async () => { try { const r = await api('/api/af', {}); toast(r.result === 'OK' ? 'Focused' : `Focus: ${r.result}`, r.result !== 'OK'); } catch (e) { toast(e.message, true); } },
   cancel,
   brighter: () => step('ev', +1),
@@ -465,8 +639,10 @@ for (const b of $('driveSeg').querySelectorAll('button')) {
     // Tapping the active Burst/Timer again steps through its counts, like a camera's drive dial.
     if (drive.mode === m && m === 'burst') drive.burst = BURSTS[(BURSTS.indexOf(drive.burst) + 1) % BURSTS.length];
     else if (drive.mode === m && m === 'timer') drive.timer = TIMERS[(TIMERS.indexOf(drive.timer) + 1) % TIMERS.length];
+    else if (drive.mode === m && m === 'preset' && presets.length) drive.preset = (drive.preset + 1) % presets.length;
     drive.mode = m;
-    saveDrive(); renderDrive();
+    saveDrive(); renderDrive(); renderPresets();
+    if (m === 'preset' && presets[drive.preset]) toast(`P${drive.preset + 1} ${presets[drive.preset].name}: ${describePreset(presets[drive.preset])}`);
   };
 }
 for (const seg of document.querySelectorAll('.seg[data-opt]')) {

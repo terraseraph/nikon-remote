@@ -4,3 +4,4 @@ captures/
 *.log
 .remote-key
 .env
+presets.json
