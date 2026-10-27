@@ -71,7 +71,8 @@ const tunnel = new Tunnel({ port: PORT });
 tunnel.on('state', t => console.log(`Tunnel: ${t.status}${t.url ? ` ${t.url}` : ''}${t.error ? ` (${t.error})` : ''}`));
 
 const json = (res, status, body) => {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  // X-App lets the desktop app tell this server apart from another program on the same port.
+  res.writeHead(status, { 'Content-Type': 'application/json', 'X-App': 'nikon-remote' });
   res.end(JSON.stringify(body));
 };
 

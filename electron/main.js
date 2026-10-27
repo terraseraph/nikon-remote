@@ -3,28 +3,39 @@
 import { app, BrowserWindow, Menu, dialog, session, shell } from 'electron';
 import { createServer } from 'node:net';
 
-const PORT = +process.env.PORT || 8765;
-const URL_ = `http://localhost:${PORT}/`;
+const PREFERRED_PORT = +process.env.PORT || 8765;
+let port = PREFERRED_PORT;
+// 127.0.0.1, not localhost: localhost can resolve to IPv6 first, where another program may be listening.
+const appUrl = () => `http://127.0.0.1:${port}/`;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let win = null;
 let server = null; // the imported server module, when this process runs it
 
-// An `npm start` server already on the port is reused instead of failing to bind a second one.
-async function serverRunning() {
-  try { return (await fetch(`http://127.0.0.1:${PORT}/api/state`, { signal: AbortSignal.timeout(1500) })).ok; } catch { return false; }
+// An `npm start` server already on the port is reused instead of starting a second one. Only ours
+// counts: other programs (file sharing, search tools) also answer on ports like this one.
+async function ourServerOn(p) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${p}/api/state`, { signal: AbortSignal.timeout(1500) });
+    return res.ok && res.headers.get('x-app') === 'nikon-remote';
+  } catch { return false; }
 }
 
 // Checked up front: the server binds as soon as it's imported, before we could catch the error.
-const portFree = () => new Promise(resolve => {
+const portFree = p => new Promise(resolve => {
   const probe = createServer().once('error', () => resolve(false)).once('listening', () => probe.close(() => resolve(true)));
-  probe.listen(PORT, '0.0.0.0');
+  probe.listen(p, '0.0.0.0');
 });
 
 async function startServer() {
-  if (await serverRunning()) return;
-  if (!(await portFree())) throw Object.assign(new Error('port in use'), { code: 'EADDRINUSE' });
+  if (await ourServerOn(PREFERRED_PORT)) return;
+  // Another program has the port: use the next free one. Phones need a fresh QR scan then.
+  for (port = PREFERRED_PORT; !(await portFree(port)); port++) {
+    if (port >= PREFERRED_PORT + 20) throw Object.assign(new Error('no free port'), { code: 'EADDRINUSE' });
+  }
+  if (port !== PREFERRED_PORT) console.log(`Port ${PREFERRED_PORT} is used by another program; using ${port}`);
+  process.env.PORT = String(port);
   // Keys, presets and thumbnails go in the user-data folder; the install folder is read-only.
   process.env.DATA_DIR ||= app.getPath('userData');
   server = await import('../src/server.js');
@@ -39,7 +50,7 @@ function createWindow() {
     width: 1400, height: 900, minWidth: 420, minHeight: 600,
     title: 'Nikon Remote', backgroundColor: '#111111', autoHideMenuBar: true,
   });
-  win.loadURL(URL_);
+  win.loadURL(appUrl());
   // Photo credits and other links open in the default browser, not inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   win.on('closed', () => (win = null));
@@ -52,7 +63,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         // Voice needs Chrome or Edge, so this opens the same app there.
-        { label: 'Open in browser', accelerator: 'CmdOrCtrl+B', click: () => shell.openExternal(URL_) },
+        { label: 'Open in browser', accelerator: 'CmdOrCtrl+B', click: () => shell.openExternal(appUrl()) },
         // Only known when this window runs the server, not when it reuses an `npm start` one.
         ...(server ? [{ label: 'Open photos folder', click: () => shell.openPath(server.CAPTURES) }] : []),
         { type: 'separator' },
@@ -69,13 +80,13 @@ app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(
 app.whenReady().then(async () => {
   // Microphone and webcam are only needed for clap and webcam gestures, from our own page.
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
-    cb(['media', 'clipboard-sanitized-write'].includes(permission) && new URL(wc.getURL()).hostname === 'localhost');
+    cb(['media', 'clipboard-sanitized-write'].includes(permission) && new URL(wc.getURL()).hostname === '127.0.0.1');
   });
   try {
     await startServer();
   } catch (e) {
     dialog.showErrorBox('Nikon Remote', e.code === 'EADDRINUSE'
-      ? `Port ${PORT} is already used by another program. Close it, or set PORT to a free port.`
+      ? `Ports ${PREFERRED_PORT}–${PREFERRED_PORT + 20} are all used by other programs. Close one, or set PORT to a free port.`
       : `The camera server couldn't start: ${e.message}`);
     return app.quit();
   }
