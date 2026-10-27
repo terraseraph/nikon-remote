@@ -7,7 +7,7 @@
 
 A USB remote for your camera that runs on your own Windows PC: live view, full exposure control, an AI shot assistant, reference-photo posing guides, and hands-free triggers by voice, gesture or clap. Use it in its own **desktop window**, in **Chrome or Edge**, or from your **phone** over Wi-Fi or the internet.
 
-Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS**, **Sony Alpha** and other PTP cameras (see [Supported cameras](#supported-cameras)). No camera drivers, SDKs or vendor software needed: it talks to the camera over the PTP driver that Windows already has.
+Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS**, **Sony Alpha** and other PTP cameras (see [Supported cameras](#supported-cameras)). No camera drivers, SDKs or vendor software needed: it talks to the camera over the PTP driver that Windows already has. A **webcam** or other USB video camera works too (see [Webcams](#webcams)).
 
 ## Features
 
@@ -19,6 +19,7 @@ Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS
 - **Exposure controls:** aperture, shutter, ISO, exposure compensation, white balance, metering, focus mode, image quality and size. What's writable follows the mode dial: everything in **M**, partial in P/A/S.
 - **Video recording:** start and stop by button, key, voice ("action" / "cut") or gesture
 - **Auto-download:** every shot, including ones taken with the camera's own shutter button, is copied to `Pictures/Nikon Remote/YYYY-MM-DD/` and shown in the gallery strip
+- **Webcams:** pick the laptop's webcam (or any USB video camera) as the camera instead: live view, photos, video and every control it exposes, from the laptop and the phone
 
 ### Shooting
 - **Shutter** with delay timer, bursts and autofocus-before-shot
@@ -51,6 +52,7 @@ The app identifies the camera from what it reports over USB and picks a driver f
 | **Canon EOS** DSLRs and R-series | Experimental, untested | Settings, shutter, autofocus, live view, video (in movie mode), auto-download. No tap-to-focus or focus box yet. |
 | **Sony Alpha** in PC Remote mode | Experimental, untested | Settings, shutter, autofocus, live view, video, auto-download. No tap-to-focus or focus box yet. |
 | **Fujifilm, OM System / Olympus, Panasonic, Pentax, Leica, Sigma** and other PTP cameras | Experimental, untested | Standard PTP: settings, shutter and auto-download. No live view, so no shot assist, pose matching or live view gestures. |
+| **Webcams** and other USB video (UVC) cameras | Tested on a laptop's FHD webcam | Live view, photos, video, and whichever controls the webcam exposes. See [Webcams](#webcams). |
 
 The Canon and Sony drivers follow those brands' USB protocols as documented by the [libgphoto2](https://github.com/gphoto/libgphoto2) project, and `npm test` checks them against simulated cameras, but nobody has run them on real hardware yet. If you have one of these cameras, an issue saying what worked and what didn't (with the output of `npm run probe`) would help a lot.
 
@@ -61,6 +63,20 @@ Camera setup tips:
 - **Fujifilm:** set **Connection Setting › PC Connection Mode** to **USB Tether Shooting**.
 
 Brand drivers live in `src/drivers/`. Each one translates its camera's settings into the same codes and units, so the UI, voice commands and shot assist don't need to know which camera is connected.
+
+## Webcams
+
+Pick a webcam from the source list next to the camera name at the top of the app, **on the laptop**. The app then treats it like a tethered camera: live view goes to every open page including the phone, the shutter, timer, bursts, presets, time-lapse, voice, gesture and clap triggers all take photos with it, photos and clips land in the same `Pictures/Nikon Remote/YYYY-MM-DD/` folder and gallery (as `Webcam_HHMMSS.jpg` / `.mp4`), and shot assist reads its live view.
+
+- **Controls:** whatever the webcam reports, under **More › Exposure**: exposure mode, shutter (exposure time), ISO, exposure compensation, white balance and colour temperature, focus mode and distance, resolution, brightness, contrast, saturation, sharpness, zoom, pan, tilt and the light. Most webcams offer only some of these; a laptop's built-in one typically has resolution, shutter, white balance, brightness, contrast, saturation and sharpness. Changes apply straight away. Setting the shutter or ISO switches the webcam to manual exposure (**M**); pick **P** to let it expose itself again. "Brighter" and "darker" use brightness when there's no exposure compensation.
+- **Photos** are taken at the webcam's photo resolution where it has one, otherwise at the resolution chosen under **Image size**.
+- **Video** records with sound when the laptop's microphone is allowed, as MP4 (or WebM where the browser can't make MP4), and is saved a second at a time while recording.
+- **Shot assist** scene presets and Ask AI work with the settings the webcam has; there's no aperture, and no mode dial to turn.
+- **Phones** see the webcam list and control the webcam like any camera, and can switch back to the USB camera, but a webcam can only be picked on the laptop: the laptop's page runs it.
+- The laptop remembers the pick: the desktop app (or a localhost tab) reopens the webcam next time. If that window closes, the webcam goes offline until it's picked again; phones see that and can switch back to the USB camera.
+- While a webcam is in use the USB camera stays connected in the background, so photos taken with its own shutter button still download, but its live view stops.
+
+Keep the desktop window (or the localhost tab) open while using a webcam from the phone; minimising it is fine in the desktop app. A background browser tab may slow the frames down, so prefer the desktop app for this.
 
 ## Getting started
 
@@ -214,11 +230,13 @@ The Z50II only records when its **photo/video switch** is on video; the app tell
 - Only the **Nikon Z50II** has been tested. Other Nikon Z and DSLR bodies share the same PTP extensions and will probably work; other brands are experimental (see [Supported cameras](#supported-cameras)). `npm run probe` lists everything a connected camera supports.
 - Live view keeps the sensor running and uses more battery. Turn it off (L) when you don't need it.
 - Zoom is a digital magnifier on the 1024px live feed, not a true 100% view; the Z50II doesn't expose in-camera magnification over USB.
+- **Webcams** need the app open on the laptop, since Node can't open a webcam itself: the page captures it and hands frames, photos and video to the server. Only one window runs it at a time; picking it in another window takes over. The resolution goes back to the highest one when the webcam is reopened. Webcam controls depend on the browser: Chrome, Edge and the desktop app expose the most; tap-to-focus and autofocus only work on webcams that report those controls.
 
 ## How it works
 
 ```
 browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) ──JSON over stdio──▶ bridge/camera-bridge.ps1 ──WPD / PTP──▶ camera
+laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, video ──HTTP──▶ src/server.js
 ```
 
 - `bridge/camera-bridge.ps1` is a long-running PowerShell process whose inline C# sends raw PTP operations through the Windows Portable Devices API (`WPD_COMMAND_MTP_EXT_*`), including data-in and data-out phases.
@@ -228,6 +246,7 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
   - `nikon.js`: Nikon live view (`0x9201`/`0x9203`), capture (`0x9207` in live view), AF, tap-to-focus, video and `CheckEvent`
   - `canon.js`: Canon EOS remote mode, `GetEvent` settings and downloads, viewfinder data, release on/off
   - `sony.js`: Sony SDIO handshake, button-style controls, in-memory captures and live view handles
+- `src/webcam.js` is a webcam as a camera source with the same surface as `camera.js`. The laptop's page (`public/webcam.js`) runs the webcam: it holds a command stream open (SSE), pushes JPEG frames into the same live view path the USB camera uses, and uploads photos and video; `public/webcam-props.js` maps the webcam's capabilities to the app's camera properties and back. `src/frames.js` (live view frames and viewers) and `src/photos.js` (the captures folder) are shared by both sources.
 - `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`.
 - `electron/main.js` runs the same server inside Electron and opens it in a window.
 - `public/` is the app: `app.js` for the UI and shooting sequences, `scenes.js` for the shot assist scene presets, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
@@ -237,7 +256,7 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
 | Method | Path | Body |
 | --- | --- | --- |
 | GET | `/api/state` | |
-| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets`, `config` (API keys changed) |
+| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets`, `config` (API keys changed). `state` includes `source` (`camera` or `webcam`), `webcams` and `usbCamera` |
 | GET | `/api/liveview.mjpg` | |
 | GET | `/api/liveview.jpg?after=N` | Next frame newer than `N`, re-encoded smaller; `X-Seq` and `X-AF` headers |
 | GET | `/api/photos` | |
@@ -257,6 +276,10 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
 | GET / POST | `/api/settings` | `{ "keys": { "PEXELS_API_KEY": "…" } }`, `""` clears one; returns only set/source/last 4 (PC only) |
 | POST | `/api/settings/test` | `{ "name": "OPENROUTER_API_KEY", "value": "…" }` (PC only) |
 | POST | `/api/reconnect` | |
+| POST | `/api/source` | `{ "source": "camera" }`: back to the USB camera. A webcam is picked by the laptop page opening `/api/webcam/host` |
+| GET | `/api/webcam/host?device=…&label=…` | SSE command stream for the page running the webcam (PC only) |
+| POST | `/api/webcam/frame`, `/photo?id=N`, `/movie` | JPEG frame, photo for command `N`, next video chunk (PC only, size-capped) |
+| POST | `/api/webcam/state`, `/reply`, `/devices` | The webcam's properties, a command's result, the laptop's webcam list (PC only) |
 
 ### Configuration
 
