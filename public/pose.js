@@ -2,9 +2,9 @@
 // MediaPipe's pose landmarker (in the browser), draws the reference pose as a ghost lined up on
 // the person in frame, and scores how close they are with a hint on what to change.
 // The reference may be matched as shown or mirrored, whichever is closer.
+import { VISION, modelUrl } from './assets.js';
 
-const VISION = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+const MODEL = modelUrl('pose_landmarker_lite');
 
 const MIN_VIS = 0.5;
 const TICK_MS = 80;
@@ -122,7 +122,7 @@ export class PoseMatch {
   // Finds the pose in a (CORS-readable, fully loaded) image and starts matching against it.
   async pin(img) {
     try { await this.load(); }
-    catch { throw new Error('Could not load the pose model (needs internet the first time)'); }
+    catch { throw new Error('Could not load the pose model'); }
     const res = this.image.detect(img);
     const ref = toPose(res.landmarks?.[0], img.naturalWidth, img.naturalHeight);
     if (!ref) throw new Error('No clear person in that photo — try another one');

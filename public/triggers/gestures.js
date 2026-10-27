@@ -1,9 +1,9 @@
 // Hand-gesture triggers using MediaPipe's gesture recognizer, run in the browser.
 // It can watch the Nikon's own live view (so the person in the photo controls the shot)
-// or the laptop webcam. The model and runtime load from a CDN the first time it's enabled.
+// or the laptop webcam. The model and runtime load the first time it's enabled.
+import { VISION, modelUrl } from '../assets.js';
 
-const VISION = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+const MODEL = modelUrl('gesture_recognizer');
 
 export const GESTURES = {
   Open_Palm: { emoji: '✋', label: 'Open palm' },
@@ -87,7 +87,7 @@ export class GestureTrigger {
 
   async start() {
     try { await this.load(); }
-    catch { throw new Error('Could not load the gesture model (needs internet the first time)'); }
+    catch { throw new Error('Could not load the gesture model'); }
     this.source = this.getSource();
     if (this.source === 'webcam') {
       this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })

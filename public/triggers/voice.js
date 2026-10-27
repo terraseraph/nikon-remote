@@ -1,5 +1,6 @@
-// Voice commands via the browser's Web Speech API (Chrome / Edge).
-// Note: those browsers send the audio to their own cloud speech service for recognition.
+// Voice commands. The offline engines (Whisper, Vosk, Windows) are in listen.js; "browser" is the
+// Web Speech API in Chrome or Edge, which sends the audio to their own cloud speech service.
+import { PhraseListener, laptopEngine, voskEngine } from './listen.js';
 
 const NUMBERS = { one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, fifteen: 15, twenty: 20, thirty: 30 };
 const num = w => (w == null ? NaN : /^\d+$/.test(w) ? +w : NUMBERS[w] ?? NaN);
@@ -77,18 +78,55 @@ export function parseCommand(text) {
   return null;
 }
 
+export const VOICE_ENGINES = {
+  whisper: 'Whisper: offline, best with accents',
+  vosk: 'Vosk: offline, fixed commands, runs in this page',
+  windows: 'Windows: offline, US English, fastest',
+  browser: 'Chrome or Edge: online',
+};
+
 export class VoiceTrigger {
-  constructor({ actions, onHeard }) {
-    this.actions = actions;
-    this.onHeard = onHeard;
+  constructor({ actions, onHeard, onError, getEngine }) {
+    Object.assign(this, { actions, onHeard, onError, getEngine });
     this.active = false;
   }
 
   start() {
+    const engine = this.getEngine();
+    return engine === 'browser' ? this.startBrowser() : this.startOffline(engine);
+  }
+
+  // One phrase's text guesses, best first: the first one that's a command wins.
+  heard(guesses) {
+    let text = guesses[0], cmd = null;
+    for (const g of guesses) {
+      cmd = parseCommand(g);
+      if (cmd) { text = g; break; }
+    }
+    this.onHeard(text, cmd?.[0]);
+    cmd?.[1](this.actions);
+  }
+
+  async startOffline(name) {
+    const engine = name === 'vosk' ? voskEngine() : laptopEngine(name);
+    await engine.load();
+    this.active = true;
+    this.listener = new PhraseListener({
+      onPhrase: async samples => {
+        try {
+          const texts = await engine.transcribe(samples);
+          if (this.active && texts.length) this.heard(texts);
+        } catch (e) { if (this.active) this.onError(e); }
+      },
+    });
+    try { await this.listener.start(); } catch (e) { this.stop(); throw e; }
+  }
+
+  startBrowser() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return Promise.reject(new Error('Voice needs Chrome or Edge (this browser has no speech recognition)'));
     // Electron has the API but not Google's speech service behind it, so it would only fail with "network".
-    if (/Electron/.test(navigator.userAgent)) return Promise.reject(new Error('Voice needs Chrome or Edge: use View › Open in browser'));
+    if (/Electron/.test(navigator.userAgent)) return Promise.reject(Object.assign(new Error('Voice needs Chrome or Edge'), { needsBrowser: true }));
     this.active = true;
     this.rec = new SR();
     this.rec.continuous = true;
@@ -98,15 +136,7 @@ export class VoiceTrigger {
     this.rec.lang = navigator.language || 'en-AU';
     this.rec.onresult = e => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (!e.results[i].isFinal) continue;
-        const guesses = Array.from(e.results[i], alt => alt.transcript.trim());
-        let text = guesses[0], cmd = null;
-        for (const g of guesses) {
-          cmd = parseCommand(g);
-          if (cmd) { text = g; break; }
-        }
-        this.onHeard(text, cmd?.[0]);
-        cmd?.[1](this.actions);
+        if (e.results[i].isFinal) this.heard(Array.from(e.results[i], alt => alt.transcript.trim()));
       }
     };
     // Chrome ends continuous recognition after silence; keep it alive while enabled.
@@ -129,5 +159,7 @@ export class VoiceTrigger {
   stop() {
     this.active = false;
     try { this.rec?.stop(); } catch {}
+    this.listener?.stop();
+    this.listener = null;
   }
 }

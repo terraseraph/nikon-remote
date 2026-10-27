@@ -1,6 +1,6 @@
 import { fmt, LABEL } from './format.js';
 import { SCENES, CONDITIONS, MODE_INFO, presetAdvice, presetBrief, presetPlan, presetSummary } from './scenes.js';
-import { VoiceTrigger, VOICE_HELP } from './triggers/voice.js';
+import { VoiceTrigger, VOICE_HELP, VOICE_ENGINES } from './triggers/voice.js';
 import { GestureTrigger, GESTURES } from './triggers/gestures.js';
 import { ClapTrigger } from './triggers/clap.js';
 import { LiveView } from './liveview.js';
@@ -51,11 +51,18 @@ function startPolling() {
 
 // ---------- feedback ----------
 let toastTimer;
-function toast(msg, bad = false) {
+// An action adds a button and keeps the toast up long enough to reach it.
+function toast(msg, bad = false, action) {
   const t = $('toast');
   t.textContent = msg; t.className = 'toast' + (bad ? ' bad' : '');
+  if (action) {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.onclick = () => { t.classList.add('hidden'); action.run(); };
+    t.append(b);
+  }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), 2500);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), action ? 8000 : 2500);
 }
 
 let audio;
@@ -1332,9 +1339,9 @@ let qrLib;
 async function loadQrLib() {
   qrLib ??= await new Promise((resolve, reject) => {
     const sc = document.createElement('script');
-    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+    sc.src = '/vendor/qrcode.min.js';
     sc.onload = () => resolve(window.qrcode);
-    sc.onerror = () => reject(new Error('Could not load the QR code library (offline?)'));
+    sc.onerror = () => reject(new Error('Could not load the QR code library'));
     document.head.append(sc);
   }).catch(e => { toast(e.message, true); return null; });
 }
@@ -1573,7 +1580,11 @@ function triggerToggle(id, badgeId, trigger) {
   $(id).onchange = async () => {
     if ($(id).checked) {
       try { await trigger.start(); }
-      catch (e) { $(id).checked = false; toast(e.message, true); }
+      catch (e) {
+        $(id).checked = false;
+        // The desktop app opens window.open links in the default browser, where voice works.
+        toast(e.message, true, e.needsBrowser && { label: 'Open in browser', run: () => window.open(location.href) });
+      }
     } else trigger.stop();
     const on = $(id).checked;
     $(badgeId).classList.toggle('hidden', !on);
@@ -1660,15 +1671,25 @@ for (const b of document.querySelectorAll('.trig[data-toggle]')) {
   };
 }
 
+// Which engine turns speech into text, remembered per device: Whisper unless picked otherwise.
+$('voiceEngine').append(...Object.entries(VOICE_ENGINES).map(([v, label]) => new Option(label, v)));
+try { if (VOICE_ENGINES[localStorage.voiceEngine]) $('voiceEngine').value = localStorage.voiceEngine; } catch {}
 const voice = new VoiceTrigger({
   actions,
+  getEngine: () => $('voiceEngine').value,
   onHeard: (text, matched) => {
     $('heard').textContent = `“${text}”${matched ? ` → ${matched}` : ''}`;
     showHeard(text, matched);
     if (matched) toast(`🎙 ${matched}`);
   },
+  onError: e => toast(`Voice: ${e.message}`, true),
 });
 triggerToggle('voiceToggle', 'voiceBadge', voice);
+// Switching engines while listening restarts voice on the new one.
+$('voiceEngine').onchange = () => {
+  try { localStorage.voiceEngine = $('voiceEngine').value; } catch {}
+  if ($('voiceToggle').checked) { voice.stop(); $('voiceToggle').dispatchEvent(new Event('change')); }
+};
 renderVoiceHelp();
 
 const gestures = new GestureTrigger({

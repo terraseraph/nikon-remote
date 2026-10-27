@@ -13,7 +13,9 @@
     "app": "electron .",
     "dist": "electron-builder --win",
     "test": "node test/drivers.test.js && node test/scenes.test.js && node test/webcam.test.js",
-    "probe": "node scripts/probe.js"
+    "probe": "node scripts/probe.js",
+    "vendor": "node scripts/vendor.js",
+    "postinstall": "node scripts/vendor.js"
   },
   "engines": {
     "node": ">=20"
@@ -33,10 +35,12 @@
       "src/**",
       "public/**",
       "bridge/**",
+      "engines/**",
       "package.json"
     ],
     "asarUnpack": [
-      "bridge/**"
+      "bridge/**",
+      "engines/**"
     ],
     "directories": {
       "output": "dist"

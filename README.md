@@ -49,8 +49,8 @@ Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS
 - Works with **Nous Portal**, **OpenRouter** or **Anthropic** models. A dozen vision models to choose from in the app.
 
 ### Hands-free triggers
-- **Voice commands:** "shoot", "timer five", "burst three", "focus", "brighter", "ISO 800", "preset two", "suggest settings", "inspo for golden hour portraits", "next", "match pose", "cancel"…
-- **Hand gestures:** watches the Nikon's own live view (or your webcam). ✋ palm = 3 s timer, ✌️ = shoot, 👍 = timer + 3 shots, ✊ = cancel, ☝️ = focus. Each gesture can be remapped.
+- **Voice commands:** "shoot", "timer five", "burst three", "focus", "brighter", "ISO 800", "preset two", "suggest settings", "inspo for golden hour portraits", "next", "match pose", "cancel"… Recognised **offline** by Whisper by default; Vosk, Windows' own recogniser or Chrome/Edge's online one can be picked under **More › Triggers › Engine** (see [Voice engines](#voice-engines)).
+- **Hand gestures:** watches the Nikon's own live view (or your webcam). ✋ palm = 3 s timer, ✌️ = shoot, 👍 = timer + 3 shots, ✊ = cancel, ☝️ = focus. Each gesture can be remapped. Works offline.
 - **Clap to shoot**, fully offline, with a sensitivity slider
 
 ### Remote access
@@ -122,6 +122,8 @@ cd nikon-remote
 npm install
 ```
 
+This also downloads about 180 MB that isn't kept in git (`npm run vendor`): the MediaPipe runtime and models for gestures and pose matching, and the Whisper and Vosk voice engines.
+
 Plug the camera in over USB, switch it on, then pick one of the two ways to run it.
 
 > Close Nikon NX Tether, SnapBridge, Canon EOS Utility, Sony Imaging Edge, Lightroom tethering, or anything else that grabs the camera first. Only one app can talk to it at a time.
@@ -142,7 +144,7 @@ npm run dist
 
 In the desktop app, keys, presets and thumbnails are stored in `%APPDATA%\Nikon Remote`; a `.env` there is read too. If an `npm start` server is already running, the window uses it instead of starting a second one.
 
-Voice commands need Chrome's or Edge's speech service, which Electron doesn't include. Use **View › Open in browser** (Ctrl+B) to open the same session in your browser when you want voice. Everything else, including clap and gestures, works in the desktop window.
+Everything works in the desktop window, voice included with the offline engines. Only the **Chrome or Edge** voice engine needs their browser: picking it in the desktop window offers an **Open in browser** button (or press Ctrl+B) that opens the same session in your default browser.
 
 #### In the browser
 
@@ -150,7 +152,7 @@ Voice commands need Chrome's or Edge's speech service, which Electron doesn't in
 npm start
 ```
 
-Then open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for voice; everything else works in any modern browser.
+Then open **http://localhost:8765/** in **Chrome or Edge** (any modern browser works, but only those two offer the online voice engine).
 
 ## Setting up the AI features
 
@@ -207,6 +209,19 @@ Then set `CF_TUNNEL=nikon` and `CF_TUNNEL_URL=https://camera.example.com`. For a
 
 Over the tunnel the phone pulls live view frames instead of receiving a pushed stream, the camera drops to 640px live view, and frames are re-encoded at JPEG quality 60 (about 70 KB → 21 KB). That keeps live view current on a slow home upload.
 
+## Voice engines
+
+Pick one under **More › Triggers › Engine**. The choice is remembered on each device, so the laptop and a phone can use different ones.
+
+| Engine | Where it runs | Good for |
+| --- | --- | --- |
+| **Whisper** (default) | On the laptop, offline (whisper.cpp, `base.en` model) | The most accurate, and the best with accents. Hears any phrase, so "inspo …" requests come through whole. About a quarter of a second per command. |
+| **Vosk** | In the page, offline (WebAssembly, small English model) | Listens only for the command list, which makes it hard to mishear, and runs in the page itself. Weaker on accents and on free-text "inspo …" requests. |
+| **Windows** | On the laptop, offline (Windows' own recogniser) | The fastest: about 10 ms per command. US English only, and Microsoft no longer develops it. |
+| **Chrome or Edge** | Google's or Microsoft's speech service | Needs the internet, and those browsers rather than the desktop window. |
+
+The page listens to the microphone, cuts out each spoken phrase and hands it to the engine. Whisper and Windows get it over the app's own connection, so they work on a phone over the internet too (phones only allow the microphone over https).
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -234,8 +249,8 @@ The Z50II only records when its **photo/video switch** is on video; the app tell
 
 ### Privacy
 
-- **Voice** uses the browser's built-in speech recognition. Chrome and Edge send the audio to Google's or Microsoft's speech service.
-- **Gestures and pose matching** run locally in the browser, but the MediaPipe runtime and models download from jsDelivr and Google's model storage the first time.
+- **Voice** stays on the laptop with the Whisper, Vosk and Windows engines. The Chrome or Edge engine sends the audio to Google's or Microsoft's speech service.
+- **Gestures and pose matching** run locally in the browser, and the MediaPipe runtime and models ship with the app, so they work offline. A phone using the app over the Cloudflare tunnel loads them from jsDelivr and Google's model storage instead, which is faster than pulling them through the laptop's upload. `npm run vendor` re-downloads the bundled copies, for changing their versions.
 - **Clap** detection is fully local.
 - **Shot assist and inspo** send the live view frame to your chosen AI provider, and search terms to the photo services, only when you ask. Keep that in mind for private or client sessions.
 
@@ -262,7 +277,7 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
   - `canon.js`: Canon EOS remote mode, `GetEvent` settings and downloads, viewfinder data, release on/off
   - `sony.js`: Sony SDIO handshake, button-style controls, in-memory captures and live view handles
 - `src/webcam.js` is a webcam as a camera source with the same surface as `camera.js`. The laptop's page (`public/webcam.js`) runs the webcam: it holds a command stream open (SSE), pushes JPEG frames into the same live view path the USB camera uses, and uploads photos and video; `public/webcam-props.js` maps the webcam's capabilities to the app's camera properties and back. `src/frames.js` (live view frames and viewers) and `src/photos.js` (the captures folder) are shared by both sources.
-- `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`.
+- `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`; `src/voice.js` runs the Whisper (`engines/whisper/whisper-server.exe`) and Windows (`bridge/speech.ps1`) voice engines.
 - `electron/main.js` runs the same server inside Electron and opens it in a window.
 - `public/` is the app: `app.js` for the UI and shooting sequences, `scenes.js` for the shot assist scene presets, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
 
@@ -295,6 +310,8 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
 | GET | `/api/webcam/host?device=…&label=…` | SSE command stream for the page running the webcam (PC only) |
 | POST | `/api/webcam/frame`, `/photo?id=N`, `/movie` | JPEG frame, photo for command `N`, next video chunk (PC only, size-capped) |
 | POST | `/api/webcam/state`, `/reply`, `/devices` | The webcam's properties, a command's result, the laptop's webcam list (PC only) |
+| GET | `/api/voice` | Which laptop voice engines are installed: `{ "whisper": true, "windows": true }` |
+| POST | `/api/voice/transcribe?engine=whisper` | One spoken phrase as 16 kHz mono WAV; returns `{ "texts": ["Timer five."] }`, best guess first |
 
 ### Configuration
 

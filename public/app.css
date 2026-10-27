@@ -90,6 +90,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .toast { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: #000c; border: 1px solid var(--line); padding: 8px 14px; border-radius: 999px; max-width: 90%; animation: toastIn .35s var(--spring); z-index: 2; }
 @keyframes toastIn { from { transform: translate(-50%, 10px); opacity: 0; } }
 .toast.bad { border-color: var(--bad); color: var(--bad); }
+.toast button { margin-left: 10px; padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor; background: none; color: inherit; font: inherit; cursor: pointer; }
 .gesture-hud { position: absolute; top: 56px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
 #webcam { width: 180px; border-radius: 8px; transform: scaleX(-1); display: none; }
 .gesture-hud.webcam #webcam { display: block; }

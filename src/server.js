@@ -15,6 +15,7 @@ import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
 import { findInspo, inspoConfig, proxyImage } from './inspo.js';
 import { loadSettings, saveSettings, settingsView, testKey } from './settings.js';
+import { transcribe, voiceEngines, stopVoice } from './voice.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -35,7 +36,8 @@ const KEY_FILE = join(DATA, '.remote-key');
 const PRESETS_FILE = join(DATA, 'presets.json');
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.wasm': 'application/wasm',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json',
   '.nef': 'application/octet-stream', '.mov': 'video/quicktime', '.mp4': 'video/mp4', '.webm': 'video/webm',
 };
@@ -289,6 +291,15 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ...settingsView(), on: { assist: !!advisorConfig().provider, inspo: inspoConfig().sources.length > 0 } });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
+  // Offline voice: a page posts each spoken phrase as WAV and gets text back. Phones too, so
+  // Whisper works on a phone over the tunnel.
+  if (path === '/api/voice') return json(res, 200, voiceEngines());
+  if (path === '/api/voice/transcribe' && req.method === 'POST') {
+    try {
+      const wav = await raw(req, 2e6); // 12 s at 16 kHz is under 400 kB
+      return json(res, 200, { texts: await transcribe(url.searchParams.get('engine'), wav) });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
   // The webcam host: only the laptop's own page may run the webcam, push frames or upload photos.
   if (path.startsWith('/api/webcam/')) {
     if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
@@ -359,6 +370,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 
 export async function shutdown() {
   tunnel.stop();
+  stopVoice();
   await webcam.close().catch(() => {});
   await camera.stopMovie().catch(() => {});
   await camera.close();

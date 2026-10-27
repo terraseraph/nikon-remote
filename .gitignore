@@ -9,3 +9,5 @@ dist/
 .env.*
 !.env.example
 settings.json
+public/vendor/
+engines/
