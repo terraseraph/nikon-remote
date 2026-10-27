@@ -1,11 +1,17 @@
 {
   "name": "local-camera-nikon",
+  "productName": "Nikon Remote",
   "version": "0.1.0",
-  "description": "Browser-based USB remote for Nikon cameras: live view, exposure control, voice and gesture triggers.",
+  "description": "USB remote for Nikon cameras: live view, exposure control, AI shot assist, voice and gesture triggers. Runs in the browser or as a desktop app.",
+  "author": "terra seraph",
+  "license": "MIT",
   "private": true,
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node src/server.js",
+    "app": "electron .",
+    "dist": "electron-builder --win",
     "probe": "node scripts/probe.js"
   },
   "engines": {
@@ -13,5 +19,39 @@
   },
   "dependencies": {
     "jpeg-js": "0.4.4"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.terraseraph.nikonremote",
+    "productName": "Nikon Remote",
+    "files": [
+      "electron/**",
+      "src/**",
+      "public/**",
+      "bridge/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "bridge/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.exe"
+    }
   }
 }

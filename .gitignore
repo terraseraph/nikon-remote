@@ -5,3 +5,6 @@ captures/
 .remote-key
 .env
 presets.json
+dist/
+.env.*
+!.env.example

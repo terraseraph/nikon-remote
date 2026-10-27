@@ -16,16 +16,19 @@ import { findInspo, inspoConfig, proxyImage } from './inspo.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
-// API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file next to package.json.
-if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'));
+// Files the app writes (keys, presets, thumbnails). Next to package.json by default; the desktop
+// app points DATA_DIR at its user-data folder because its own install folder is read-only.
+const DATA = process.env.DATA_DIR || ROOT;
+// API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file in DATA_DIR.
+if (existsSync(join(DATA, '.env'))) process.loadEnvFile(join(DATA, '.env'));
 const CAPTURES = normalize(process.env.CAPTURES_DIR || join(picturesDir(), 'Nikon Remote'));
 // Thumbnails stay with the app so they don't show up as photos in the Pictures album.
-const THUMBS = join(ROOT, '.cache', 'thumbs');
+const THUMBS = join(DATA, '.cache', 'thumbs');
 const PORT = +process.env.PORT || 8765;
 const LAN = process.env.LAN !== '0'; // LAN=0 keeps the server reachable from this machine only
-const KEY_FILE = join(ROOT, '.remote-key');
+const KEY_FILE = join(DATA, '.remote-key');
 // Shooting presets live on the laptop so the phone and the laptop share the same list.
-const PRESETS_FILE = join(ROOT, 'presets.json');
+const PRESETS_FILE = join(DATA, 'presets.json');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -257,9 +260,14 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   if (LAN) console.log('Phone access: use the Phone button in the app (Windows may ask to allow Node through the firewall — choose Private networks).');
 });
 
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => {
+export async function shutdown() {
   tunnel.stop();
   await camera.stopMovie().catch(() => {});
   await camera.close();
+}
+export { server, PORT, CAPTURES };
+
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => {
+  await shutdown();
   process.exit(0);
 });

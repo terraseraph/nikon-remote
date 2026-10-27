@@ -5,7 +5,8 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 
-const SCRIPT = fileURLToPath(new URL('../bridge/camera-bridge.ps1', import.meta.url));
+// In the packaged desktop app the script is unpacked beside app.asar, where PowerShell can read it.
+const SCRIPT = fileURLToPath(new URL('../bridge/camera-bridge.ps1', import.meta.url)).replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 
 export class Bridge extends EventEmitter {
   constructor() {

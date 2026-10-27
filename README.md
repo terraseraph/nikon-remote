@@ -1,139 +1,196 @@
-# local_camera_nikon
+# Nikon Remote
 
-A browser remote for a USB-connected Nikon camera, built and tested on a **Nikon Z50II**.
-It runs entirely on your own machine with no drivers or installs beyond Node and one small pure-JavaScript package.
+A USB remote for Nikon cameras that runs on your own Windows PC: live view, full exposure control, an AI shot assistant, reference-photo posing guides, and hands-free triggers by voice, gesture or clap. Use it in its own **desktop window**, in **Chrome or Edge**, or from your **phone** over Wi-Fi or the internet.
 
-- **Live view** in the browser at 1024px, showing the camera's focus box
+Built and tested on a **Nikon Z50II**. No camera drivers, SDKs or Nikon software needed: it talks to the camera over the PTP driver that Windows already has.
+
+## Features
+
+### Camera control
+- **Live view** at 1024px with the camera's focus box drawn on top
 - **Tap to focus:** tap anywhere on the live view to move the AF point there and focus
-- **Zoom** 2× or 3× around the focus point, to check framing and sharpness
-- **Phone remote:** scan a QR code and use your phone on the same Wi-Fi as the remote
-- **Shutter** with a delay timer, bursts and autofocus-before-shot
-- **Video recording:** start and stop by button, R key, voice ("action" / "cut") or gesture
-- **Exposure controls:** aperture, shutter, ISO, exposure comp, white balance, metering, quality and size.
-  What's writable depends on the mode dial: everything in **M**, partial in P/A/S.
-- **Auto-download:** every shot, including ones taken with the camera's own button, is copied into `Pictures/Nikon Remote/YYYY-MM-DD/` and shown in the gallery strip
-- **Voice commands:** "shoot", "timer five", "burst three", "focus", "brighter", "ISO 800", "cancel", …
-- **Hand gestures:** watches the Nikon's own live view (or your webcam). ✋ palm = 3 s timer, ✌️ = shoot, 👍 = timer + 3 shots, ✊ = cancel, ☝️ = focus. Each gesture can be remapped in the app.
-- **Clap to shoot**, offline, with a sensitivity slider
-- **Time-lapse**, a rule-of-thirds grid, countdown beeps and keyboard shortcuts
+- **Zoom** 2× or 3× around the focus point to check framing and sharpness
+- **Rotate and flip** the preview for odd mounting angles or mirrored selfie framing
+- **Exposure controls:** aperture, shutter, ISO, exposure compensation, white balance, metering, focus mode, image quality and size. What's writable follows the mode dial: everything in **M**, partial in P/A/S.
+- **Video recording:** start and stop by button, key, voice ("action" / "cut") or gesture
+- **Auto-download:** every shot, including ones taken with the camera's own shutter button, is copied to `Pictures/Nikon Remote/YYYY-MM-DD/` and shown in the gallery strip
 
-## Run it
+### Shooting
+- **Shutter** with delay timer, bursts and autofocus-before-shot
+- **Shooting presets:** numbered routines of steps ("wait 3 s, then take 3 shots 0.5 s apart"), repeated a set number of times or until cancelled. Presets are shared live across every open device.
+- **Ready chime** just before each shot so your subject knows when to hold still
+- **Time-lapse**, rule-of-thirds grid, countdown beeps and keyboard shortcuts
 
-1. Plug the camera in over USB-C and switch it on.
-2. Install once, then start the server:
-   ```bash
-   npm install
-   ```
-   ```bash
-   npm start
-   ```
-3. Open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for voice; everything else works in any modern browser.
+### AI assistance (optional, bring your own key)
+- **Shot assist:** pick a scene (portrait, low-light, action, landscape…), add conditions (handheld, tripod, moody…) or describe it in your own words. A vision model looks at the live view frame and the camera's current settings and suggests aperture, shutter, ISO, EV, white balance, metering, focus mode and quality, using only values your camera offers. Suggestions appear right on the exposure controls (old → new), and one **Apply** sets them all. Settings the mode dial blocks are queued and applied as soon as you turn the dial.
+- **Inspo:** say or type what you're after ("moody couple pose against a wall") and get real reference photos from Pexels, Unsplash or Google Images shown over the live view. Nothing is AI-generated.
+- **Pose matching:** pin a reference photo and its pose is drawn as a ghost skeleton on the person in frame, with a live match score and hints like "raise left arm".
+- Works with **Nous Portal**, **OpenRouter** or **Anthropic** models. A dozen vision models to choose from in the app.
 
-Close Nikon NX Tether, SnapBridge for Windows, or anything else that grabs the camera first: only one app can talk to it at a time.
+### Hands-free triggers
+- **Voice commands:** "shoot", "timer five", "burst three", "focus", "brighter", "ISO 800", "preset two", "suggest settings", "inspo for golden hour portraits", "next", "match pose", "cancel"…
+- **Hand gestures:** watches the Nikon's own live view (or your webcam). ✋ palm = 3 s timer, ✌️ = shoot, 👍 = timer + 3 shots, ✊ = cancel, ☝️ = focus. Each gesture can be remapped.
+- **Clap to shoot**, fully offline, with a sensitivity slider
 
-### From your phone
+### Remote access
+- **Phone remote:** scan a QR code and use your phone as the remote on the same Wi-Fi. Access is protected by a private key carried in the QR code.
+- **From anywhere:** one switch starts a Cloudflare Tunnel for a public https address, so the phone works on mobile data too. Live view is tuned for slow uploads (about 7–8 fps on a 4.6 Mbit/s connection).
 
-Click **📱 Phone** in the app on the laptop and scan the QR code with a phone on the same Wi-Fi.
+## Getting started
 
-- The code carries a private access key. The phone keeps it as a cookie, so you only scan once.
-- Requests from other devices without the key are refused. Delete `.remote-key` and restart to issue a new key and lock out every phone that has scanned before.
-- The first time, Windows may ask to let Node through the firewall. Allow it on **Private** networks.
-- Phones only allow microphone and camera access over https, so voice, clap and webcam gestures stay on the laptop. Gestures that watch the Nikon's own live view do work on the phone.
-- Run with `LAN=0` to keep the server reachable from the laptop only.
+**Requirements:** Windows 10 or 11, [Node.js 20+](https://nodejs.org/), and a Nikon camera on USB.
+
+```bash
+git clone https://github.com/terraseraph/nikon-remote.git
+```
+
+```bash
+cd nikon-remote
+```
+
+```bash
+npm install
+```
+
+Plug the camera in over USB, switch it on, then pick one of the two ways to run it.
+
+> Close Nikon NX Tether, SnapBridge, or anything else that grabs the camera first. Only one app can talk to it at a time.
+
+### Desktop app (Electron)
+
+```bash
+npm run app
+```
+
+Opens Nikon Remote in its own window, with the camera server running inside it. Phones can still connect to it as usual.
+
+To build an installer and a portable `.exe` into `dist/`:
+
+```bash
+npm run dist
+```
+
+In the desktop app, keys, presets and thumbnails are stored in `%APPDATA%\Nikon Remote`, so put your `.env` there. If an `npm start` server is already running, the window uses it instead of starting a second one.
+
+Voice commands need Chrome's or Edge's speech service, which Electron doesn't include. Use **View › Open in browser** (Ctrl+B) to open the same session in your browser when you want voice. Everything else, including clap and gestures, works in the desktop window.
+
+### In the browser
+
+```bash
+npm start
+```
+
+Then open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for voice; everything else works in any modern browser.
+
+## Setting up the AI features
+
+Everything works without any keys; only shot assist and inspo are switched off. To enable them, copy [`.env.example`](.env.example) to `.env` (next to `package.json`, or in `%APPDATA%\Nikon Remote` for the desktop app), fill in the keys you have, and restart.
+
+| Feature | Keys (any one is enough) |
+| --- | --- |
+| Shot assist | `NOUS_API_KEY`, `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` |
+| Inspo photo search | `PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY` or `SERPER_API_KEY` (Google Images) |
+
+Inspo also uses the shot assist model, when one is configured, to turn your request into better searches and a one-line posing cue.
+
+Press **✦** (or **A**, or say "suggest settings") for shot assist, and **Inspo** (or **I**, or say "inspo for …") for reference photos. A shot assist request sends one ~1024px frame and typically takes 3–8 seconds and well under a cent.
+
+## Using your phone
+
+Click **📱 Phone** in the app on the PC and scan the QR code with a phone on the same Wi-Fi.
+
+- The QR code carries a private access key. The phone keeps it as a cookie, so you only scan once.
+- Requests from other devices without the key are refused. Delete `.remote-key` and restart to issue a new key and lock out every phone that scanned before.
+- The first time, Windows may ask to let Node (or Nikon Remote) through the firewall. Allow it on **Private** networks.
+- Phones only allow microphone and camera access over https, so on Wi-Fi, voice, clap and webcam gestures stay on the PC. Gestures that watch the Nikon's own live view work on the phone.
+- Set `LAN=0` to keep the server reachable from the PC only.
 
 ### From anywhere (Cloudflare Tunnel)
 
-To use the phone on mobile data or another network, switch on **Share over the internet** in the 📱 Phone dialog. This starts [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), which gives you a public https address with no bandwidth cap. Because the address is https, voice and clap work on the phone too. You still need to scan the QR code, which carries the access key: visitors without the key are refused, the same as on Wi-Fi.
+Switch on **Share over the internet** in the 📱 Phone dialog. This starts [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) and gives you a public https address, so voice and clap work on the phone too. Visitors still need the access key from the QR code.
 
-Install it once:
+Install `cloudflared` once:
 
 ```bash
 winget install Cloudflare.cloudflared
 ```
 
-With nothing else set up, the app starts a **quick tunnel** on a random `trycloudflare.com` address that changes every time. Quick tunnels hold back server-sent events, so when the live event stream stays silent for 5 seconds the app polls `/api/state` every second and `/api/photos` every 3 seconds instead. Cloudflare doesn't guarantee uptime for quick tunnels, and the address changes every time, so scan the new QR code after each start.
-
-Live view over the tunnel works differently from the laptop's stream, so it stays current on a slow home upload:
-
-- The phone **pulls** frames (`/api/liveview.jpg`) with four requests in flight, instead of receiving a pushed stream. A pushed stream piles up in Cloudflare's buffers and falls seconds behind.
-- While anyone is pulling, the camera switches to its **640px** live view. It goes back to 1024px about 3 seconds after they stop.
-- Pulled frames are **re-encoded at JPEG quality 60** with [`jpeg-js`](https://www.npmjs.com/package/jpeg-js), which takes them from about 70 KB to about 21 KB.
-
-On a 4.6 Mbit/s upload this gives about 7–8 fps, up from about 1 fps with full-size pushed frames.
-
-For a stable address, set up a **named tunnel** on a domain in your Cloudflare account:
+With no other setup you get a **quick tunnel** on a random `trycloudflare.com` address that changes on every start, so scan the new QR code each time. For a stable address, create a **named tunnel** on your own domain:
 
 ```bash
 cloudflared tunnel login
+```
+
+```bash
 cloudflared tunnel create nikon
+```
+
+```bash
 cloudflared tunnel route dns nikon camera.example.com
 ```
 
-Then start the server with `CF_TUNNEL=nikon` and `CF_TUNNEL_URL=https://camera.example.com`. For a second layer of login, add a Cloudflare Access application for that hostname (Zero Trust → Access → Applications) that only allows your email address.
+Then set `CF_TUNNEL=nikon` and `CF_TUNNEL_URL=https://camera.example.com`. For a second login layer, add a Cloudflare Access application for that hostname that only allows your email address.
 
-The tunnel stops when you switch it off or stop the server. The on/off switch and the link are only shown on the laptop.
+Over the tunnel the phone pulls live view frames instead of receiving a pushed stream, the camera drops to 640px live view, and frames are re-encoded at JPEG quality 60 (about 70 KB → 21 KB). That keeps live view current on a slow home upload.
 
-### Video
-
-The Z50II only records when its **photo/video switch** is on video. If it isn't, the app says so. Clips are downloaded into `captures/` like photos once you stop recording. Large clips pause live view for a few seconds while they copy.
-
-### Shot advisor (AI)
-
-Press the **✦** button at the end of the exposure bar (or **A**, or say "suggest settings"). Pick a scene (low-light boudoir, portrait, action, landscape…), tap any conditions that apply (handheld, tripod, no flash, moody…), or describe the scene in your own words, then press **Suggest**. The app sends the current live view frame and the camera's settings to a vision model, which suggests aperture, shutter speed, ISO, exposure compensation, white balance, metering, focus mode and quality, choosing only values your camera offers.
-
-The suggestions appear on the exposure chips themselves (old value → new value), with a short summary and tips in the popover. One **Apply** in the bar (or saying "apply settings") sets them all. Settings the mode dial blocks, such as shutter speed in A mode, show a lock and a warning. When you press Apply they're queued, then set automatically as soon as you turn the dial to a mode that allows them.
-
-To enable it, create a `.env` file next to `package.json`, then restart the server:
-
-```
-OPENROUTER_API_KEY=sk-or-...
-# optional: which model the picker starts on
-ADVISOR_MODEL=anthropic/claude-haiku-5.5
-```
-
-The **Model** picker (More › Advisor, or tap the model name in the popover) switches between Claude Haiku 5.5, DeepSeek V4.1 Flash and Gemini 3.1 Flash Lite, all through OpenRouter. To offer other image-capable models, set `ADVISOR_MODELS` to a comma-separated list of OpenRouter model IDs. To also offer Haiku through Anthropic's own API, add `ANTHROPIC_API_KEY`. Each request sends one frame of about 1024px. In testing, a request took 3–8 seconds and cost well under a cent.
-
-### Keyboard
+## Keyboard shortcuts
 
 | Key | Action |
 | --- | --- |
-| Space | Shoot (using the delay/shots/gap settings) |
+| Space | Shoot (using the current drive mode or preset) |
 | F | Autofocus |
 | L | Live view on/off |
 | G | Grid overlay |
 | Z | Zoom 1× → 2× → 3× |
+| O | Rotate preview |
+| H | Flip preview |
 | R | Start/stop video recording |
-| A | Ask the shot advisor for settings |
+| A | Shot assist |
+| I | Inspo panel |
+| [ / ] | Previous / next reference photo |
+| M | More settings |
 | Click/tap live view | Move focus point there and focus |
-| Esc | Cancel countdown / burst / time-lapse |
+| Esc | Cancel countdown, burst, preset or time-lapse |
 
-### Privacy notes
+## Notes
+
+### Video
+
+The Z50II only records when its **photo/video switch** is on video; the app tells you if it isn't. Clips download like photos once you stop recording, and large clips pause live view for a few seconds while they copy.
+
+### Privacy
 
 - **Voice** uses the browser's built-in speech recognition. Chrome and Edge send the audio to Google's or Microsoft's speech service.
-- **Gestures** run locally in the browser, but the first time you turn them on, the MediaPipe runtime and model download from jsDelivr and Google's model storage.
+- **Gestures and pose matching** run locally in the browser, but the MediaPipe runtime and models download from jsDelivr and Google's model storage the first time.
 - **Clap** detection is fully local.
-- **Shot advisor** sends the live view frame to OpenRouter (and on to the model provider) or to Anthropic, but only when you press the button. Keep that in mind for private or client sessions.
+- **Shot assist and inspo** send the live view frame to your chosen AI provider, and search terms to the photo services, only when you ask. Keep that in mind for private or client sessions.
+
+### Known limits
+
+- **Windows only**, since the camera bridge uses Windows Portable Devices.
+- Only the **Z50II** has been tested. Other Nikon Z and DSLR bodies share the same PTP extensions and will probably work. `npm run probe` lists everything a connected camera supports.
+- Live view keeps the sensor running and uses more battery. Turn it off (L) when you don't need it.
+- Zoom is a digital magnifier on the 1024px live feed, not a true 100% view; the Z50II doesn't expose in-camera magnification over USB.
 
 ## How it works
 
 ```
-browser  ──HTTP/SSE/MJPEG──▶  src/server.js (Node)  ──stdin/stdout JSON──▶  bridge/camera-bridge.ps1  ──WPD/PTP──▶  camera
+browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) ──JSON over stdio──▶ bridge/camera-bridge.ps1 ──WPD / PTP──▶ camera
 ```
 
-- `bridge/camera-bridge.ps1` is a long-running PowerShell process. Its inline C# sends raw PTP operations through the Windows Portable Devices API (`WPD_COMMAND_MTP_EXT_*`), including data-in and data-out phases. Windows already has a driver for the camera, so nothing extra is installed.
-- `src/ptp.js` holds the PTP and Nikon opcodes plus binary dataset parsing (DeviceInfo, DevicePropDesc, ObjectInfo, Nikon CheckEvent).
-- `src/camera.js` handles the connection lifecycle and auto-reconnect, the live view loop (Nikon `0x9201`/`0x9203`), capture (`0x9207` in live view, otherwise `0x100E`), property get/set, and the event poll that auto-downloads new photos.
-- `src/server.js` exposes the JSON API, the SSE event stream, the MJPEG live view and static files.
-- `public/` holds the app: `app.js` for the UI and shooting sequences, `liveview.js` for the MJPEG-to-canvas reader, and `triggers/` for voice, gestures and clap.
-
-`npm run probe` dumps every operation, event and property the connected camera supports, which is handy for adding new controls.
+- `bridge/camera-bridge.ps1` is a long-running PowerShell process whose inline C# sends raw PTP operations through the Windows Portable Devices API (`WPD_COMMAND_MTP_EXT_*`), including data-in and data-out phases.
+- `src/ptp.js` holds the PTP and Nikon opcodes and parses binary datasets (DeviceInfo, DevicePropDesc, ObjectInfo, Nikon CheckEvent).
+- `src/camera.js` handles connection and auto-reconnect, the live view loop (Nikon `0x9201`/`0x9203`), capture (`0x9207` in live view, otherwise `0x100E`), properties, and the event poll that auto-downloads new photos.
+- `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`.
+- `electron/main.js` runs the same server inside Electron and opens it in a window.
+- `public/` is the app: `app.js` for the UI and shooting sequences, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
 
 ### API
 
 | Method | Path | Body |
 | --- | --- | --- |
 | GET | `/api/state` | |
-| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log` |
+| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets` |
 | GET | `/api/liveview.mjpg` | |
 | GET | `/api/liveview.jpg?after=N` | Next frame newer than `N`, re-encoded smaller; `X-Seq` and `X-AF` headers |
 | GET | `/api/photos` | |
@@ -141,20 +198,21 @@ browser  ──HTTP/SSE/MJPEG──▶  src/server.js (Node)  ──stdin/stdout
 | POST | `/api/af` | |
 | POST | `/api/focus-point` | `{ "x": 0.3, "y": 0.5, "focus": true }` (fractions of the frame) |
 | POST | `/api/movie` | `{ "on": true }` |
-| GET | `/api/remote` | Phone QR URLs and tunnel status (laptop only) |
-| POST | `/api/tunnel` | `{ "on": true }` (laptop only) |
 | POST | `/api/liveview` | `{ "on": true }` |
 | POST | `/api/prop` | `{ "code": 20495, "value": 800 }` |
 | POST | `/api/prop/step` | `{ "code": 20495, "delta": 1 }` |
-| GET | `/api/advisor` | Advisor provider, model and scene list |
-| POST | `/api/advise` | `{ "scene": "boudoir", "notes": "handheld" }` |
+| GET / POST | `/api/presets` | `{ "presets": [ … ] }` |
+| GET | `/api/advisor` | Shot assist models and scene list |
+| POST | `/api/advise` | `{ "scene": "portrait", "notes": "handheld" }` |
+| GET / POST | `/api/inspo` | `{ "request": "moody couple pose" }` |
+| GET | `/api/remote` | Phone QR URLs and tunnel status (PC only) |
+| POST | `/api/tunnel` | `{ "on": true }` (PC only) |
 | POST | `/api/reconnect` | |
 
-Environment variables: `PORT` (default 8765), `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection on Windows), `LAN` (set to `0` for laptop-only access), and for the Cloudflare tunnel `CF_TUNNEL` (named tunnel), `CF_TUNNEL_URL` (its public address) and `CLOUDFLARED` (path to the binary if it isn't found automatically).
+### Configuration
 
-## Known limits
+All settings are environment variables, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
 
-- Windows only, since the bridge uses WPD. Other Nikon Z / DSLR bodies will probably work because they share the same PTP extensions, but only the Z50II has been tested.
-- Image-quality labels follow Nikon's usual numbering. Codes the app doesn't recognise show as "Quality N".
-- Live view keeps the camera's sensor running, so it uses more battery. Turn it off (L) when you don't need it.
-- Zoom is a digital magnifier on the 1024px live feed. The Z50II doesn't expose its in-camera magnification over USB, so this isn't a true 100% pixel view.
+## License
+
+[MIT](LICENSE)

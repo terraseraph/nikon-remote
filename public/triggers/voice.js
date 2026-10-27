@@ -87,6 +87,8 @@ export class VoiceTrigger {
   start() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return Promise.reject(new Error('Voice needs Chrome or Edge (this browser has no speech recognition)'));
+    // Electron has the API but not Google's speech service behind it, so it would only fail with "network".
+    if (/Electron/.test(navigator.userAgent)) return Promise.reject(new Error('Voice needs Chrome or Edge: use View › Open in browser'));
     this.active = true;
     this.rec = new SR();
     this.rec.continuous = true;
