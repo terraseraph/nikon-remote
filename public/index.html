@@ -286,9 +286,13 @@
     <div class="as-form" id="asForm">
       <div class="as-tags" id="asScenes" role="group" aria-label="Scene"></div>
       <div class="as-tags" id="asMods" role="group" aria-label="Conditions"></div>
-      <div class="as-ask">
-        <input id="asNotes" placeholder="Describe the scene or the look you want" maxlength="300" aria-label="Scene description">
-        <button id="asGo" class="as-go">Suggest</button>
+      <button id="asGo" class="as-go">Use preset settings</button>
+      <div class="as-ai">
+        <div class="as-ask">
+          <input id="asNotes" placeholder="Notes for the AI (optional): the look you want" maxlength="300" aria-label="Notes for Ask AI">
+          <button id="asAi" class="as-ai-go">Ask AI</button>
+        </div>
+        <p class="as-hint" id="asAiHint"></p>
       </div>
     </div>
     <div class="as-busy hidden" id="asBusy" role="status">
@@ -308,7 +312,7 @@
     <button class="step as-x" id="asDiscard" title="Discard suggestions" aria-label="Discard suggestions">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
   </div>
-  <button class="step as-btn" id="assistBtn" title="Shot assist: AI-suggested settings (A)" aria-label="Shot assist" aria-expanded="false" aria-controls="assist">
+  <button class="step as-btn" id="assistBtn" title="Shot assist: settings for the scene (A)" aria-label="Shot assist" aria-expanded="false" aria-controls="assist">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 2l.6 1.4L7 4l-1.4.6L5 6l-.6-1.4L3 4l1.4-.6z"/></svg><span class="as-dot hidden" id="asDot"></span></button>
   <button class="step" id="expoMore" title="All exposure settings" aria-label="All exposure settings">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>

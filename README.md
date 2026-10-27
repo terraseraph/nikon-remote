@@ -27,7 +27,7 @@ Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS
 - **Time-lapse**, rule-of-thirds grid, countdown beeps and keyboard shortcuts
 
 ### AI assistance (optional, bring your own key)
-- **Shot assist:** pick a scene (portrait, low-light, action, landscape…), add conditions (handheld, tripod, moody…) or describe it in your own words. A vision model looks at the live view frame and the camera's current settings and suggests aperture, shutter, ISO, EV, white balance, metering, focus mode and quality, using only values your camera offers. Suggestions appear right on the exposure controls (old → new), and one **Apply** sets them all. Settings the mode dial blocks are queued and applied as soon as you turn the dial.
+- **Shot assist:** pick a scene (portrait, low-light, action, landscape…) and conditions (handheld, tripod, moody…). **Use preset settings** works without any key: it picks sensible generic aperture, shutter, ISO, EV, white balance, metering and focus for that kind of shot, recommends a mode, and explains what each change does. **Ask AI** goes further: a vision model looks at the live view frame (plus any notes you add) and tunes the settings to the exact scene. Either way only values your camera offers are used, suggestions appear right on the exposure controls (old → new), and one **Apply** sets them all. Settings the mode dial blocks are queued and applied as soon as you turn the dial.
 - **Inspo:** say or type what you're after ("moody couple pose against a wall") and get real reference photos from Pexels, Unsplash or Google Images shown over the live view. Nothing is AI-generated.
 - **Pose matching:** pin a reference photo and its pose is drawn as a ghost skeleton on the person in frame, with a live match score and hints like "raise left arm".
 - Works with **Nous Portal**, **OpenRouter** or **Anthropic** models. A dozen vision models to choose from in the app.
@@ -123,7 +123,7 @@ Then open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for
 
 ## Setting up the AI features
 
-Everything works without any keys; only shot assist and inspo are switched off. To enable them, copy [`.env.example`](.env.example) to `.env` (next to `package.json`, or in `%APPDATA%\Nikon Remote` for the desktop app), fill in the keys you have, and restart.
+Everything works without any keys, including shot assist's scene presets; only its Ask AI button and inspo are switched off. To enable them, copy [`.env.example`](.env.example) to `.env` (next to `package.json`, or in `%APPDATA%\Nikon Remote` for the desktop app), fill in the keys you have, and restart.
 
 | Feature | Keys (any one is enough) |
 | --- | --- |
@@ -132,7 +132,7 @@ Everything works without any keys; only shot assist and inspo are switched off. 
 
 Inspo also uses the shot assist model, when one is configured, to turn your request into better searches and a one-line posing cue.
 
-Press **✦** (or **A**, or say "suggest settings") for shot assist, and **Inspo** (or **I**, or say "inspo for …") for reference photos. A shot assist request sends one ~1024px frame and typically takes 3–8 seconds and well under a cent.
+Press **✦** (or **A**) for shot assist, or say "suggest settings" (Ask AI when it's set up and live view is on, the scene preset otherwise), and **Inspo** (or **I**, or say "inspo for …") for reference photos. An Ask AI request sends one ~1024px frame and typically takes 3–8 seconds and well under a cent.
 
 ## Using your phone
 
@@ -226,7 +226,7 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
   - `sony.js`: Sony SDIO handshake, button-style controls, in-memory captures and live view handles
 - `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`.
 - `electron/main.js` runs the same server inside Electron and opens it in a window.
-- `public/` is the app: `app.js` for the UI and shooting sequences, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
+- `public/` is the app: `app.js` for the UI and shooting sequences, `scenes.js` for the shot assist scene presets, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
 
 ### API
 
