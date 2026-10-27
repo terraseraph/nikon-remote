@@ -115,7 +115,7 @@ async function plan(camera, request, model) {
 export async function findInspo(camera, { request, model }) {
   request = String(request || '').trim().slice(0, 200);
   if (!request) throw new Error('Say or type what you\'re looking for');
-  if (!activeSources().length) throw new Error('Add PEXELS_API_KEY or SERPER_API_KEY to .env to search for reference photos');
+  if (!activeSources().length) throw new Error('Add a Pexels, Unsplash or Serper key under More › AI on the laptop to search for reference photos');
   const { queries, cue, orientation } = await plan(camera, request, model);
 
   const jobs = [];

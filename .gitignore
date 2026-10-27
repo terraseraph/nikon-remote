@@ -8,3 +8,4 @@ presets.json
 dist/
 .env.*
 !.env.example
+settings.json

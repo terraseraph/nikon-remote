@@ -160,7 +160,7 @@ const norm = s => String(s).toLowerCase().replace(/[\s×]/g, '').replace(/−/g,
 
 export async function advise(camera, { scene, notes = '', model }) {
   const models = advisorModels();
-  if (!models.length) throw new Error('Set NOUS_API_KEY (or OPENROUTER_API_KEY / ANTHROPIC_API_KEY) in .env to use the advisor');
+  if (!models.length) throw new Error('Add a Nous, OpenRouter or Anthropic key under More › AI on the laptop to use shot assist');
   const config = modelConfig(model);
   if (!camera.connected) throw new Error('Camera not connected');
   if (!camera.liveView || !camera.frame) throw new Error('Turn on live view so the advisor can see the scene');

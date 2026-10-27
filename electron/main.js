@@ -51,8 +51,12 @@ function createWindow() {
     title: 'Nikon Remote', backgroundColor: '#111111', autoHideMenuBar: true,
   });
   win.loadURL(appUrl());
-  // Photo credits and other links open in the default browser, not inside the app.
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  // Photo credits, "Get a key" and other target=_blank links open in the default browser, not
+  // inside the app. Web links only: openExternal would also launch file: and other handlers.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.on('closed', () => (win = null));
 }
 

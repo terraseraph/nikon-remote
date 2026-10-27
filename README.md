@@ -73,7 +73,7 @@ The quickest way: download the latest build for Windows 10 or 11, no Node.js nee
 
 The builds aren't code-signed yet, so Windows SmartScreen may warn the first time: choose **More info › Run anyway**. Every push to `main` rebuilds them with [GitHub Actions](.github/workflows/release.yml), and bumping `version` in `package.json` starts a new release.
 
-Put your `.env` (for the AI features) in `%APPDATA%\Nikon Remote`.
+To turn on the AI features, add your API keys in the app under **More › AI** (see [Setting up the AI features](#setting-up-the-ai-features)).
 
 ### Run from source
 
@@ -109,7 +109,7 @@ To build an installer and a portable `.exe` into `dist/`:
 npm run dist
 ```
 
-In the desktop app, keys, presets and thumbnails are stored in `%APPDATA%\Nikon Remote`, so put your `.env` there. If an `npm start` server is already running, the window uses it instead of starting a second one.
+In the desktop app, keys, presets and thumbnails are stored in `%APPDATA%\Nikon Remote`; a `.env` there is read too. If an `npm start` server is already running, the window uses it instead of starting a second one.
 
 Voice commands need Chrome's or Edge's speech service, which Electron doesn't include. Use **View › Open in browser** (Ctrl+B) to open the same session in your browser when you want voice. Everything else, including clap and gestures, works in the desktop window.
 
@@ -123,12 +123,16 @@ Then open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for
 
 ## Setting up the AI features
 
-Everything works without any keys; only shot assist and inspo are switched off. To enable them, copy [`.env.example`](.env.example) to `.env` (next to `package.json`, or in `%APPDATA%\Nikon Remote` for the desktop app), fill in the keys you have, and restart.
+Everything works without any keys; only shot assist and inspo are switched off. To enable them, open **More › AI** in the app on the PC, paste the keys you have and press **Save keys**. They take effect straight away, on the phone too. Each key has a **Get a key** link to the provider's sign-up page, and most have a **Test** button that checks the key with the provider.
 
 | Feature | Keys (any one is enough) |
 | --- | --- |
-| Shot assist | `NOUS_API_KEY`, `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` |
-| Inspo photo search | `PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY` or `SERPER_API_KEY` (Google Images) |
+| Shot assist | [Nous Portal](https://portal.nousresearch.com), [OpenRouter](https://openrouter.ai/keys) or [Anthropic](https://console.anthropic.com/settings/keys) |
+| Inspo photo search | [Pexels](https://www.pexels.com/api/), [Unsplash](https://unsplash.com/developers) or [Serper](https://serper.dev) (Google Images) |
+
+Keys are stored only on the PC, in `settings.json` in the data folder (`%APPDATA%\Nikon Remote` for the desktop app, next to `package.json` when run from source). The app never sends them back to the page, only their last four characters, and phones can't see or change them.
+
+You can also keep keys in a `.env` file in the same folder: copy [`.env.example`](.env.example), fill in `NOUS_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `PEXELS_API_KEY`, `UNSPLASH_ACCESS_KEY` or `SERPER_API_KEY`, and restart. A key saved in the app wins over the `.env` one; clearing it in the app falls back to the `.env` value.
 
 Inspo also uses the shot assist model, when one is configured, to turn your request into better searches and a one-line posing cue.
 
@@ -233,7 +237,7 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
 | Method | Path | Body |
 | --- | --- | --- |
 | GET | `/api/state` | |
-| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets` |
+| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets`, `config` (API keys changed) |
 | GET | `/api/liveview.mjpg` | |
 | GET | `/api/liveview.jpg?after=N` | Next frame newer than `N`, re-encoded smaller; `X-Seq` and `X-AF` headers |
 | GET | `/api/photos` | |
@@ -250,11 +254,13 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
 | GET / POST | `/api/inspo` | `{ "request": "moody couple pose" }` |
 | GET | `/api/remote` | Phone QR URLs and tunnel status (PC only) |
 | POST | `/api/tunnel` | `{ "on": true }` (PC only) |
+| GET / POST | `/api/settings` | `{ "keys": { "PEXELS_API_KEY": "…" } }`, `""` clears one; returns only set/source/last 4 (PC only) |
+| POST | `/api/settings/test` | `{ "name": "OPENROUTER_API_KEY", "value": "…" }` (PC only) |
 | POST | `/api/reconnect` | |
 
 ### Configuration
 
-All settings are environment variables, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
+API keys are best added in the app (**More › AI**). Everything else is an environment variable, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
 
 ## License
 

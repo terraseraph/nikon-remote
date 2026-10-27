@@ -13,14 +13,17 @@ import { Tunnel } from './tunnel.js';
 import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
 import { findInspo, inspoConfig, proxyImage } from './inspo.js';
+import { loadSettings, saveSettings, settingsView, testKey } from './settings.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
 // Files the app writes (keys, presets, thumbnails). Next to package.json by default; the desktop
 // app points DATA_DIR at its user-data folder because its own install folder is read-only.
 const DATA = process.env.DATA_DIR || ROOT;
-// API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file in DATA_DIR.
+// API keys (e.g. OPENROUTER_API_KEY for the shot advisor) can live in a .env file in DATA_DIR,
+// or be entered in the app; those are laid on top, so they win over the .env.
 if (existsSync(join(DATA, '.env'))) process.loadEnvFile(join(DATA, '.env'));
+loadSettings(DATA);
 const CAPTURES = normalize(process.env.CAPTURES_DIR || join(picturesDir(), 'Nikon Remote'));
 // Thumbnails stay with the app so they don't show up as photos in the Pictures album.
 const THUMBS = join(DATA, '.cache', 'thumbs');
@@ -218,6 +221,20 @@ const server = createServer(async (req, res) => {
     if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
     (await body(req)).on ? tunnel.start() : tunnel.stop();
     return json(res, 200, tunnelState());
+  }
+  // API keys: laptop only, like the access key above. Phones and the tunnel never see or change them.
+  if (path === '/api/settings' || path === '/api/settings/test') {
+    if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
+    try {
+      const b = await body(req);
+      if (path === '/api/settings/test') return json(res, 200, await testKey(b.name, b.value));
+      if (req.method === 'POST') {
+        saveSettings(b.keys);
+        // Open pages, the phone's included, refresh their model list and what's switched on.
+        broadcast('config', {});
+      }
+      return json(res, 200, { ...settingsView(), on: { assist: !!advisorConfig().provider, inspo: inspoConfig().sources.length > 0 } });
+    } catch (e) { return json(res, 400, { error: e.message }); }
   }
   if (path === '/api/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });

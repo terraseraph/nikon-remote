@@ -186,7 +186,7 @@
       <button class="on" role="tab" data-tab="capture">Capture</button>
       <button role="tab" data-tab="exposure">Exposure</button>
       <button role="tab" data-tab="triggers">Triggers</button>
-      <button role="tab" data-tab="advisor">Advisor</button>
+      <button role="tab" data-tab="advisor" title="Shot assist model and API keys">AI</button>
       <span class="bar"></span>
     </div>
 
@@ -264,6 +264,13 @@
     <div class="pane hidden" data-pane="advisor">
       <label class="field">Model<select id="advModel"></select></label>
       <p class="hint" id="advHint">Shot assist (the ✦ button by the exposure settings, or A) sends the live view frame to this model, which suggests settings for the scene.</p>
+      <span class="pcap">API keys</span>
+      <p class="hint tight hidden" id="keysRemote">API keys are added and changed on the laptop, under More › AI.</p>
+      <form class="keys hidden" id="keysForm" autocomplete="off">
+        <div id="keyGroups"></div>
+        <p class="hint tight">Saved on this computer only, in the app's data folder. A key saved here is used instead of the one in <code>.env</code>.</p>
+        <button class="as-go wide" id="keysSave">Save keys</button>
+      </form>
     </div>
   </section>
 </aside>

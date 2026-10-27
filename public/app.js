@@ -990,7 +990,7 @@ function setStep(text) { $('asStep').textContent = text; }
 async function suggestSettings() {
   toggleAssist(true);
   if (asking) return;
-  if (!assistReady) return toast('Add OPENROUTER_API_KEY to .env and restart to use shot assist', true);
+  if (!assistReady) return toast('Add an API key under More › AI on the laptop to use shot assist', true);
   const ctl = asking = new AbortController();
   formOpen = false;
   $('assist').classList.add('busy'); $('assistBtn').classList.add('busy');
@@ -1062,17 +1062,18 @@ $('asNotes').onkeydown = e => { if (e.key === 'Enter') suggestSettings(); else i
 $('viewport').addEventListener('animationend', e => { if (e.animationName === 'sendFrame') $('viewport').classList.remove('sending'); });
 const showModel = () => { $('asModel').textContent = `Model: ${modelLabel()}`; };
 $('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} showModel(); };
-api('/api/advisor').then(c => {
-  for (const m of c.models) $('advModel').add(new Option(m.label, m.id));
+// Run again when keys are saved (the 'config' event), so the picker follows without a reload.
+const advHintText = $('advHint').textContent;
+const loadAdvisor = () => api('/api/advisor').then(c => {
+  $('advModel').replaceChildren(...c.models.map(m => new Option(m.label, m.id)));
   try { if (c.models.some(m => m.id === localStorage.advModel)) $('advModel').value = localStorage.advModel; } catch {}
   showModel();
-  if (c.provider) return;
-  assistReady = false;
-  $('advModel').disabled = true;
-  $('asGo').disabled = true;
-  $('asModel').textContent = 'Not set up: add an API key';
-  $('advHint').textContent = 'Add OPENROUTER_API_KEY=… to a .env file next to package.json and restart to enable shot assist.';
+  assistReady = !!c.provider;
+  $('advModel').disabled = $('asGo').disabled = !assistReady;
+  $('advHint').textContent = assistReady ? advHintText : 'Shot assist needs one of the API keys below.';
+  if (!assistReady) $('asModel').textContent = 'Not set up: add an API key';
 }).catch(() => {});
+loadAdvisor();
 
 // On a phone in portrait the panel is a bottom sheet like the advanced one: drag it down to close.
 let asDrag = null;
@@ -1158,6 +1159,72 @@ $('phoneClose').onclick = () => $('phoneDialog').close();
 $('phoneDialog').addEventListener('close', () => clearTimeout(tunnelPoll));
 // Only the laptop itself may see the access key, so the button only appears there.
 api('/api/remote').then(() => $('phoneBtn').classList.remove('hidden')).catch(() => {});
+
+// ---------- API keys (More › AI) ----------
+// Laptop only: the server refuses other devices, which get a note instead of the form.
+// It never sends a key back, only whether one is set, where from and its last 4 characters.
+function make(tag, props = {}, ...kids) {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+}
+const SOURCE = { app: 'Saved in the app', env: 'From .env' };
+function keyCard(k) {
+  const input = make('input', { type: 'password', name: k.name, autocomplete: 'new-password', spellcheck: false,
+    placeholder: k.set ? `••••••••${k.hint}` : 'Paste key', ariaLabel: `${k.label} key` });
+  const eye = make('button', { type: 'button', className: 'mini', title: 'Show / hide', ariaLabel: 'Show or hide the key',
+    innerHTML: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>' });
+  eye.onclick = () => { input.type = input.type === 'password' ? 'text' : 'password'; };
+  const stat = make('span', { className: 'kstat', textContent: k.set ? `${SOURCE[k.source]}${k.hint ? ` · ends ${k.hint}` : ''}` : 'Not set' });
+  const foot = make('div', { className: 'kfoot' }, stat);
+  if (k.testable) {
+    const test = make('button', { type: 'button', className: 'pbtn text', textContent: 'Test', title: 'Check the typed key, or the one in use' });
+    test.onclick = async () => {
+      test.disabled = true; stat.className = 'kstat'; stat.textContent = 'Checking…';
+      try {
+        const r = await api('/api/settings/test', { name: k.name, value: input.value });
+        stat.className = `kstat ${r.ok ? 'ok' : 'bad'}`;
+        stat.textContent = r.ok ? 'Key works' : r.error;
+      } catch (e) { stat.className = 'kstat bad'; stat.textContent = e.message; }
+      test.disabled = false;
+    };
+    foot.append(test);
+  }
+  if (k.source === 'app') {
+    const clear = make('button', { type: 'button', className: 'pbtn text', textContent: 'Clear', title: 'Forget the saved key (a .env one applies again)' });
+    clear.onclick = () => saveKeys({ [k.name]: '' }, 'Key removed');
+    foot.append(clear);
+  }
+  return make('div', { className: 'key' },
+    make('div', { className: 'khead' }, make('span', { textContent: k.label }), make('a', { href: k.url, target: '_blank', rel: 'noopener', textContent: 'Get a key ↗' })),
+    make('div', { className: 'krow' }, input, eye),
+    foot);
+}
+function renderKeys(s) {
+  $('keyGroups').replaceChildren(...s.groups.map(g => make('div', { className: 'kgroup' },
+    make('div', { className: 'khead' }, make('span', { textContent: g.name }), make('span', { className: `kon${s.on[g.id] ? ' on' : ''}`, textContent: s.on[g.id] ? 'On' : 'Off' })),
+    make('p', { className: 'hint', textContent: g.note }),
+    ...g.keys.map(keyCard))));
+}
+const loadKeys = () => api('/api/settings').then(s => {
+  renderKeys(s);
+  $('keysForm').classList.remove('hidden');
+  $('keysRemote').classList.add('hidden');
+}).catch(() => { $('keysForm').classList.add('hidden'); $('keysRemote').classList.remove('hidden'); });
+async function saveKeys(keys, done) {
+  try { renderKeys(await api('/api/settings', { keys })); toast(done); }
+  catch (e) { toast(e.message, true); }
+}
+$('keysForm').onsubmit = e => {
+  e.preventDefault();
+  const keys = {};
+  for (const i of $('keysForm').querySelectorAll('input')) if (i.value.trim()) keys[i.name] = i.value.trim();
+  if (!Object.keys(keys).length) return toast('Paste a key first', true);
+  saveKeys(keys, 'Keys saved');
+};
+loadKeys();
+// Sent after keys change on the laptop, to every open page including the phone's.
+events.addEventListener('config', () => { loadAdvisor(); if (!$('keysForm').classList.contains('hidden')) loadKeys(); });
 
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || e.repeat || $('viewer').open || $('phoneDialog').open) return;

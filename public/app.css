@@ -215,6 +215,25 @@ input[type=range] { accent-color: var(--accent); }
 .secondary:hover { border-color: #4a4a54; }
 .wide { width: 100%; }
 
+/* ---------- API keys (AI tab) ---------- */
+.keys, #keyGroups { display: flex; flex-direction: column; gap: 12px; }
+.kgroup { display: flex; flex-direction: column; gap: 6px; }
+.kgroup > .khead { font-size: 13.5px; }
+.kgroup > .hint { margin: 0 0 2px; }
+.kon { font-size: 11px; font-weight: 600; color: var(--muted); }
+.kon.on { color: var(--ok); }
+.key { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.khead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }
+.khead a { font-size: 12px; font-weight: 500; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.khead a:hover { text-decoration: underline; }
+.krow { display: flex; align-items: center; gap: 6px; }
+.krow input { flex: 1; min-width: 0; height: 32px; background: #111; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; color: var(--fg); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+.kfoot { display: flex; align-items: center; gap: 2px; min-height: 28px; }
+.kstat { flex: 1; min-width: 0; font-size: 11.5px; color: var(--muted); }
+.kstat.ok { color: var(--ok); }
+.kstat.bad { color: var(--bad); }
+.kfoot .pbtn.text { height: 28px; }
+
 /* ---------- shooting presets (Capture tab) ---------- */
 .ptip { margin: 0; }
 .ptip b { color: var(--fg); font-weight: 600; }
