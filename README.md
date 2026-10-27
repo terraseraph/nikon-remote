@@ -1,8 +1,8 @@
 # Nikon Remote
 
-A USB remote for Nikon cameras that runs on your own Windows PC: live view, full exposure control, an AI shot assistant, reference-photo posing guides, and hands-free triggers by voice, gesture or clap. Use it in its own **desktop window**, in **Chrome or Edge**, or from your **phone** over Wi-Fi or the internet.
+A USB remote for your camera that runs on your own Windows PC: live view, full exposure control, an AI shot assistant, reference-photo posing guides, and hands-free triggers by voice, gesture or clap. Use it in its own **desktop window**, in **Chrome or Edge**, or from your **phone** over Wi-Fi or the internet.
 
-Built and tested on a **Nikon Z50II**. No camera drivers, SDKs or Nikon software needed: it talks to the camera over the PTP driver that Windows already has.
+Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS**, **Sony Alpha** and other PTP cameras (see [Supported cameras](#supported-cameras)). No camera drivers, SDKs or vendor software needed: it talks to the camera over the PTP driver that Windows already has.
 
 ## Features
 
@@ -36,6 +36,27 @@ Built and tested on a **Nikon Z50II**. No camera drivers, SDKs or Nikon software
 - **Phone remote:** scan a QR code and use your phone as the remote on the same Wi-Fi. Access is protected by a private key carried in the QR code.
 - **From anywhere:** one switch starts a Cloudflare Tunnel for a public https address, so the phone works on mobile data too. Live view is tuned for slow uploads (about 7–8 fps on a 4.6 Mbit/s connection).
 
+## Supported cameras
+
+The app identifies the camera from what it reports over USB and picks a driver for it. The connection bar shows the brand and model, and "(experimental)" for anything untested.
+
+| Camera | Status | What works |
+| --- | --- | --- |
+| **Nikon** Z and DSLR bodies | **Tested** on a Z50II | Everything |
+| **Canon EOS** DSLRs and R-series | Experimental, untested | Settings, shutter, autofocus, live view, video (in movie mode), auto-download. No tap-to-focus or focus box yet. |
+| **Sony Alpha** in PC Remote mode | Experimental, untested | Settings, shutter, autofocus, live view, video, auto-download. No tap-to-focus or focus box yet. |
+| **Fujifilm, OM System / Olympus, Panasonic, Pentax, Leica, Sigma** and other PTP cameras | Experimental, untested | Standard PTP: settings, shutter and auto-download. No live view, so no shot assist, pose matching or live view gestures. |
+
+The Canon and Sony drivers follow those brands' USB protocols as documented by the [libgphoto2](https://github.com/gphoto/libgphoto2) project, and `npm test` checks them against simulated cameras, but nobody has run them on real hardware yet. If you have one of these cameras, an issue saying what worked and what didn't (with the output of `npm run probe`) would help a lot.
+
+Camera setup tips:
+
+- **Canon:** set the camera's Wi-Fi off; USB control doesn't work while Wi-Fi is on.
+- **Sony:** set **USB Connection** to **PC Remote** in the camera's menu.
+- **Fujifilm:** set **Connection Setting › PC Connection Mode** to **USB Tether Shooting**.
+
+Brand drivers live in `src/drivers/`. Each one translates its camera's settings into the same codes and units, so the UI, voice commands and shot assist don't need to know which camera is connected.
+
 ## Getting started
 
 **Requirements:** Windows 10 or 11, [Node.js 20+](https://nodejs.org/), and a Nikon camera on USB.
@@ -54,7 +75,7 @@ npm install
 
 Plug the camera in over USB, switch it on, then pick one of the two ways to run it.
 
-> Close Nikon NX Tether, SnapBridge, or anything else that grabs the camera first. Only one app can talk to it at a time.
+> Close Nikon NX Tether, SnapBridge, Canon EOS Utility, Sony Imaging Edge, Lightroom tethering, or anything else that grabs the camera first. Only one app can talk to it at a time.
 
 ### Desktop app (Electron)
 
@@ -168,7 +189,7 @@ The Z50II only records when its **photo/video switch** is on video; the app tell
 ### Known limits
 
 - **Windows only**, since the camera bridge uses Windows Portable Devices.
-- Only the **Z50II** has been tested. Other Nikon Z and DSLR bodies share the same PTP extensions and will probably work. `npm run probe` lists everything a connected camera supports.
+- Only the **Nikon Z50II** has been tested. Other Nikon Z and DSLR bodies share the same PTP extensions and will probably work; other brands are experimental (see [Supported cameras](#supported-cameras)). `npm run probe` lists everything a connected camera supports.
 - Live view keeps the sensor running and uses more battery. Turn it off (L) when you don't need it.
 - Zoom is a digital magnifier on the 1024px live feed, not a true 100% view; the Z50II doesn't expose in-camera magnification over USB.
 
@@ -180,7 +201,11 @@ browser / Electron window ──HTTP, SSE, MJPEG──▶ src/server.js (Node) �
 
 - `bridge/camera-bridge.ps1` is a long-running PowerShell process whose inline C# sends raw PTP operations through the Windows Portable Devices API (`WPD_COMMAND_MTP_EXT_*`), including data-in and data-out phases.
 - `src/ptp.js` holds the PTP and Nikon opcodes and parses binary datasets (DeviceInfo, DevicePropDesc, ObjectInfo, Nikon CheckEvent).
-- `src/camera.js` handles connection and auto-reconnect, the live view loop (Nikon `0x9201`/`0x9203`), capture (`0x9207` in live view, otherwise `0x100E`), properties, and the event poll that auto-downloads new photos.
+- `src/camera.js` handles connection and auto-reconnect, the live view loop, the frame stream for viewers, and auto-downloading new photos. It picks a driver from `src/drivers/` for everything brand-specific:
+  - `ptp.js`: standard PTP, the base for the others and the fallback for unknown cameras
+  - `nikon.js`: Nikon live view (`0x9201`/`0x9203`), capture (`0x9207` in live view), AF, tap-to-focus, video and `CheckEvent`
+  - `canon.js`: Canon EOS remote mode, `GetEvent` settings and downloads, viewfinder data, release on/off
+  - `sony.js`: Sony SDIO handshake, button-style controls, in-memory captures and live view handles
 - `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`.
 - `electron/main.js` runs the same server inside Electron and opens it in a window.
 - `public/` is the app: `app.js` for the UI and shooting sequences, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.

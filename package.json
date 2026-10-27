@@ -2,7 +2,7 @@
   "name": "local-camera-nikon",
   "productName": "Nikon Remote",
   "version": "0.1.0",
-  "description": "USB remote for Nikon cameras: live view, exposure control, AI shot assist, voice and gesture triggers. Runs in the browser or as a desktop app.",
+  "description": "USB remote for Nikon cameras, with experimental Canon, Sony and generic PTP support: live view, exposure control, AI shot assist, voice and gesture triggers. Runs in the browser or as a desktop app.",
   "author": "terra seraph",
   "license": "MIT",
   "private": true,
@@ -12,6 +12,7 @@
     "start": "node src/server.js",
     "app": "electron .",
     "dist": "electron-builder --win",
+    "test": "node test/drivers.test.js",
     "probe": "node scripts/probe.js"
   },
   "engines": {

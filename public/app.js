@@ -442,7 +442,9 @@ export const actions = {
 function render() {
   $('connDot').classList.toggle('on', state.connected);
   const model = (state.model || state.name || '').replace(/_(\d)$/, (_, n) => 'I'.repeat(+n)); // "Z50_2" → "Z50II"
-  $('camName').textContent = state.connected ? `Nikon ${model}` : (state.error || 'Camera disconnected');
+  // Some brands repeat their name in the model ("Canon EOS R6"), so it's only added when missing.
+  const brand = state.brand && !model.toLowerCase().startsWith(state.brand.toLowerCase()) ? `${state.brand} ` : '';
+  $('camName').textContent = state.connected ? `${brand}${model}${state.experimental ? ' (experimental)' : ''}` : (state.error || 'Camera disconnected');
   $('lvBtn').classList.toggle('active', !!state.wantLiveView);
   $('lvBtn').setAttribute('aria-pressed', !!state.wantLiveView);
   const showLv = state.connected && state.wantLiveView;

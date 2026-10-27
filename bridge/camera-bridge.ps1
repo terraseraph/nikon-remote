@@ -152,9 +152,25 @@ public class PtpDevice {
 }
 '@
 
+# USB vendor IDs of camera makers. Phones and music players are WPD devices too, so they're skipped.
+$CameraVendors = @(
+  '04B0'  # Nikon
+  '04A9'  # Canon
+  '054C'  # Sony
+  '04CB'  # Fujifilm
+  '07B4'  # Olympus
+  '33A2'  # OM System
+  '04DA'  # Panasonic
+  '25FB'  # Ricoh / Pentax
+  '0A17'  # Pentax
+  '1A98'  # Leica
+  '1003'  # Sigma
+)
+
 function Find-CameraId {
   $dev = Get-PnpDevice -PresentOnly -Class WPD -ErrorAction SilentlyContinue |
-    Where-Object { $_.InstanceId -like 'USB\VID_04B0*' } | Select-Object -First 1   # 04B0 = Nikon
+    Where-Object { $_.InstanceId -match '^USB\\VID_([0-9A-F]{4})' -and $CameraVendors -contains $Matches[1] } |
+    Select-Object -First 1
   if (-not $dev) { return $null }
   [pscustomobject]@{
     Name = $dev.FriendlyName
@@ -171,7 +187,7 @@ if ($cam) {
   try { $ptp = [PtpDevice]::new($cam.Path); Reply ('{"ready":true,"name":"' + (Esc $cam.Name) + '"}') }
   catch { Reply ('{"ready":false,"error":"' + (Esc $_.Exception.Message) + '"}') }
 } else {
-  Reply '{"ready":false,"error":"No Nikon camera found over USB"}'
+  Reply '{"ready":false,"error":"No camera found over USB"}'
 }
 
 while ($null -ne ($line = [Console]::In.ReadLine())) {

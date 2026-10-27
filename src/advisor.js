@@ -83,7 +83,7 @@ export function advisorConfig() {
   return { provider: models[0]?.provider || null, model: models[0]?.id || null, models };
 }
 
-const SYSTEM = `You are an expert photographer helping someone shoot with a Nikon mirrorless camera tethered to a laptop.
+const SYSTEM = `You are an expert photographer helping someone shoot with a camera tethered to a laptop.
 You get one live view frame (it previews exposure, so judge brightness from it) plus the current settings and the exact values the camera offers for each.
 Suggest settings for the scene the photographer describes. Rules:
 - For each setting you change, use one value copied exactly from that setting's "options" list. Omit settings that should stay as they are.
@@ -169,7 +169,7 @@ export async function advise(camera, { scene, notes = '', model }) {
   const text = [
     `Scene: ${SCENES[scene] || scene || 'General photography'}`,
     notes && `Photographer's notes: ${notes}`,
-    `Camera: Nikon ${camera.info?.model || ''}`,
+    `Camera: ${camera.info?.manufacturer || ''} ${camera.info?.model || ''}`,
     `Current settings:\n${describeSettings(camera.props)}`,
   ].filter(Boolean).join('\n\n');
 

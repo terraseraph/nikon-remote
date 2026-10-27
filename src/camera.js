@@ -1,23 +1,15 @@
-// High-level Nikon camera control on top of the PTP bridge: connection lifecycle, live view,
+// High-level camera control on top of the PTP bridge: connection lifecycle, live view,
 // capture, settings and auto-download of new photos. Emits 'state', 'prop', 'photo', 'shot', 'log'.
+// Brand-specific operations live in drivers/, picked from the camera's DeviceInfo.
 import { EventEmitter } from 'node:events';
 import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
-import {
-  Op, OK, respName, encodeValue, NikonProp,
-  parseDeviceInfo, parsePropDesc, parseObjectInfo, parseNikonEvents, parseLiveViewHeader,
-} from './ptp.js';
+import { Op, OK, respName, parseDeviceInfo, parseObjectInfo } from './ptp.js';
+import { PROPS, sleep } from './drivers/ptp.js';
+import { pickDriver } from './drivers/index.js';
 
-// Properties surfaced in the UI. Whether each is writable depends on the mode dial.
-export const PROPS = {
-  0x500e: 'mode', 0x5007: 'aperture', 0xd100: 'shutter', 0x500f: 'iso', 0x5010: 'ev',
-  0x5005: 'wb', 0x500b: 'metering', 0x500a: 'focus', 0x5004: 'quality', 0x5003: 'size', 0x5001: 'battery',
-};
-
-const BUSY = new Set([0x2019]);
-const INVALID_STATUS = 0xa004;
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+export { PROPS };
 
 export class Camera extends EventEmitter {
   constructor({ capturesDir, thumbsDir = join(capturesDir, '.thumbs') }) {
@@ -40,7 +32,7 @@ export class Camera extends EventEmitter {
     this.lastPull = 0;         // when a viewer last pulled a single frame
     this.pullWaiters = [];     // pending pulls, released one per new frame
     this.smallFrames = false;  // 640px instead of 1024px live view, while someone pulls remotely
-    this.lvInfo = null;
+    this.driver = null;
     this.bridge = new Bridge();
     this.bridge.on('log', m => this.emit('log', m));
     this.bridge.on('exit', () => this.setDisconnected('Camera bridge stopped'));
@@ -50,7 +42,8 @@ export class Camera extends EventEmitter {
 
   state() {
     return {
-      connected: this.connected, name: this.name, model: this.info?.model, liveView: this.liveView,
+      connected: this.connected, name: this.name, model: this.info?.model, brand: this.driver?.brand,
+      experimental: !!this.driver?.experimental, features: this.driver?.features, liveView: this.liveView,
       wantLiveView: this.wantLiveView, capturing: this.capturing, recordingSince: this.recordingSince, props: this.props, error: this.error || null,
     };
   }
@@ -59,7 +52,7 @@ export class Camera extends EventEmitter {
 
   setDisconnected(error) {
     if (!this.connected && this.error === error) return;
-    this.connected = false; this.liveView = false; this.recordingSince = null; this.pcMode = this.appMode = false; this.error = error;
+    this.connected = false; this.liveView = false; this.recordingSince = null; this.driver?.reset(); this.error = error;
     this.emitState();
   }
 
@@ -74,10 +67,12 @@ export class Camera extends EventEmitter {
     try {
       this.info = parseDeviceInfo((await this.bridge.send(Op.GetDeviceInfo, [], { dir: 'read' })).data);
       this.name = status.name;
+      this.driver = pickDriver(this);
+      await this.driver.init();
       this.connected = true; this.error = null;
-      await this.drainEvents();
-      for (const code of Object.keys(PROPS)) await this.refreshProp(+code, false);
-      this.emit('log', `Connected to ${this.info.manufacturer} ${this.info.model}`);
+      await this.driver.drainEvents();
+      await this.driver.loadProps();
+      this.emit('log', `Connected to ${this.info.manufacturer} ${this.info.model} (${this.driver.constructor.name})`);
       this.emitState();
     } catch (e) {
       this.setDisconnected(e.message);
@@ -106,8 +101,8 @@ export class Camera extends EventEmitter {
         const remote = Date.now() - this.lastPull < 3000;
         if (this.liveView && remote !== this.smallFrames) await this.setFrameSize(remote);
         if (this.liveView && !this.capturing) await this.pumpFrame();
-        if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.pollEvents(); }
-        if (Date.now() - lastModeCheck > 1000 && !this.capturing) { lastModeCheck = Date.now(); await this.checkMode(); }
+        if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.driver.pollEvents(); }
+        if (Date.now() - lastModeCheck > 1000 && !this.capturing) { lastModeCheck = Date.now(); await this.driver.checkMode(); }
         await sleep(this.liveView ? 30 : 150);
       } catch (e) {
         this.emit('log', `loop: ${e.message}`);
@@ -119,49 +114,19 @@ export class Camera extends EventEmitter {
     }
   }
 
-  async waitReady(timeoutMs = 5000) {
-    const end = Date.now() + timeoutMs;
-    let code;
-    while (Date.now() < end) {
-      code = (await this.bridge.send(Op.NikonDeviceReady)).code;
-      if (!BUSY.has(code)) return code;
-      await sleep(50);
-    }
-    return code;
-  }
-
-  // Nikon Z bodies gate some operations behind host-control modes, switched on demand:
-  //  - PC camera mode (ChangeCameraMode 1): live view can refuse to start without it.
-  //  - application mode (ChangeApplicationMode 1): needed before movie recording.
-  // Stills work without either. Both reset when the camera is power-cycled.
-  // Returns true if the mode was switched, so the caller can retry.
-  async enterMode(flag, op, reason) {
-    if (this[flag] || !this.info?.operations.includes(op)) return false;
-    this.emit('log', `Switching camera to ${flag === 'pcMode' ? 'PC control' : 'application'} mode to ${reason}`);
-    const { code } = await this.bridge.send(op, [1]);
-    await this.waitReady();
-    this[flag] = code === OK;
-    return this[flag];
-  }
-
   async startLiveView() {
-    let { code } = await this.bridge.send(Op.NikonStartLiveView);
-    // In photo mode PC control is enough; with the switch on video the Z50II also wants application mode.
-    if (code === INVALID_STATUS && await this.enterMode('pcMode', Op.NikonChangeCameraMode, 'start live view')) {
-      ({ code } = await this.bridge.send(Op.NikonStartLiveView));
+    try {
+      await this.driver.startLiveView();
+    } catch (e) {
+      this.emit('log', `Live view: ${e.message}`); this.wantLiveView = false; return this.emitState();
     }
-    if (code === INVALID_STATUS && await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'start live view')) {
-      ({ code } = await this.bridge.send(Op.NikonStartLiveView));
-    }
-    if (code !== OK && !BUSY.has(code)) { this.emit('log', `Live view: ${respName(code)}`); this.wantLiveView = false; return this.emitState(); }
-    await this.waitReady();
     await this.setFrameSize(Date.now() - this.lastPull < 3000);
     this.liveView = true;
     this.emitState();
   }
 
   async stopLiveView() {
-    await this.bridge.send(Op.NikonEndLiveView);
+    await this.driver.stopLiveView();
     this.liveView = false;
     this.emitState();
   }
@@ -172,24 +137,20 @@ export class Camera extends EventEmitter {
   }
 
   async pumpFrame() {
-    const res = await this.bridge.send(Op.NikonGetLiveViewImage, [], { dir: 'read' });
-    if (res.code === 0xa00b) { this.liveView = false; return; } // camera dropped live view
-    if (res.code !== OK || !res.data) return;
-    const soi = res.data.indexOf(Buffer.from([0xff, 0xd8]));
-    if (soi < 0) return;
-    if (soi >= 32) this.lvInfo = parseLiveViewHeader(res.data);
-    this.frame = res.data.subarray(soi);
-    this.frameMeta = this.afBox();
+    const f = await this.driver.getFrame();
+    if (f?.stopped) { this.liveView = false; return; } // camera dropped live view
+    if (!f) return;
+    this.frame = f.jpeg;
+    this.frameMeta = f.af || null;
     this.frameSeq++;
     for (const viewer of this.viewers) writeFrame(viewer, this.frame, this.frameMeta);
     this.pullWaiters[0]?.();
   }
 
-  // Prefer the largest live view frames (1024px on the Z50II), but drop to 640px while someone
-  // watches over the internet, where frame size sets the frame rate. Older bodies may not support it.
+  // Smaller frames while someone watches over the internet, where frame size sets the frame rate.
   async setFrameSize(small) {
     this.smallFrames = small;
-    await this.bridge.send(Op.SetDevicePropValue, [NikonProp.LiveViewImageSize], { dir: 'write', data: encodeValue(2, small ? 2 : 3) }).catch(() => {});
+    await this.driver.setFrameSize(small);
   }
 
   // For viewers on slow links: the newest frame after `after`, waiting briefly for one.
@@ -208,60 +169,29 @@ export class Camera extends EventEmitter {
     return this.frame && this.frameSeq > after ? { jpeg: this.frame, seq: this.frameSeq, af: this.frameMeta } : null;
   }
 
-  // Focus box as fractions of the visible live view area, for drawing over the image.
-  afBox() {
-    const i = this.lvInfo;
-    if (!i?.display.w || !i.af.w) return null;
-    const left = i.display.x - i.display.w / 2, top = i.display.y - i.display.h / 2;
-    const r = n => Math.round(n * 1e4) / 1e4;
-    return {
-      x: r((i.af.x - i.af.w / 2 - left) / i.display.w), y: r((i.af.y - i.af.h / 2 - top) / i.display.h),
-      w: r(i.af.w / i.display.w), h: r(i.af.h / i.display.h),
-    };
-  }
-
   // Move the AF point to a spot given as fractions (0–1) of the live view, then optionally focus.
   async setFocusPoint(fx, fy, { focus = true } = {}) {
-    const i = this.lvInfo;
-    if (!this.liveView || !i) throw new Error('Tap-to-focus needs live view');
-    const clamp = (v, lo, hi) => Math.round(Math.max(lo, Math.min(hi, v)));
-    const x = clamp(i.display.x - i.display.w / 2 + fx * i.display.w, 0, i.sensor.w - 1);
-    const y = clamp(i.display.y - i.display.h / 2 + fy * i.display.h, 0, i.sensor.h - 1);
-    const { code } = await this.bridge.send(Op.NikonChangeAfArea, [x, y]);
-    if (code !== OK) throw new Error('Focus point: ' + respName(code));
+    if (!this.liveView) throw new Error('Tap-to-focus needs live view');
+    await this.driver.setFocusPoint(fx, fy);
     return { focus: focus ? await this.autofocus() : null };
   }
 
   async startMovie() {
     if (!this.connected) throw new Error('Camera not connected');
     if (this.recordingSince) return;
+    if (!this.driver.features.movie) throw this.driver.unsupported('Video recording');
     if (!this.liveView) await this.startLiveView();
-    let { code } = await this.bridge.send(Op.NikonStartMovieRecInCard);
-    if (code === INVALID_STATUS && await this.enterMode('appMode', Op.NikonChangeApplicationMode, 'record video')) {
-      ({ code } = await this.bridge.send(Op.NikonStartMovieRecInCard));
-    }
-    if (code === INVALID_STATUS) {
-      // Only blame the switch once application mode has been tried: the selector property
-      // isn't a dependable mirror of the physical switch on every body.
-      const read = async p => { const r = await this.bridge.send(Op.GetDevicePropValue, [p], { dir: 'read' }); return r.code === OK ? r.data.readUIntLE(0, Math.min(4, r.data.length)) : null; };
-      const selector = await read(NikonProp.LiveViewSelector), blocked = await read(NikonProp.MovieRecProhibitCondition);
-      this.emit('log', `Record refused: selector=${selector} prohibit=0x${(blocked ?? 0).toString(16)}`);
-      // While the host has control the camera ignores its own lever, so a flip made after
-      // connecting only registers once the camera is switched off and on again.
-      if (selector === 0) throw new Error('Camera is in photo mode. Set the photo/video switch to video, then turn the camera off and on');
-      throw new Error('Camera refused to record (check the card has space and isn\'t locked)');
-    }
-    if (code !== OK) throw new Error('Record: ' + respName(code));
+    await this.driver.startMovie();
     this.recordingSince = Date.now();
     this.emitState();
   }
 
   async stopMovie() {
     if (!this.recordingSince) return;
-    const { code } = await this.bridge.send(Op.NikonEndMovieRec);
-    this.recordingSince = null;
-    this.emitState();
-    if (code !== OK) throw new Error('Stop recording: ' + respName(code));
+    try { await this.driver.stopMovie(); } finally {
+      this.recordingSince = null;
+      this.emitState();
+    }
   }
 
   addViewer(res) {
@@ -274,47 +204,19 @@ export class Camera extends EventEmitter {
     res.on('close', () => this.viewers.delete(res));
   }
 
-  async drainEvents() {
-    await this.bridge.send(Op.NikonCheckEvent, [], { dir: 'read' }).catch(() => {});
-  }
-
-  async pollEvents() {
-    const res = await this.bridge.send(Op.NikonCheckEvent, [], { dir: 'read' });
-    if (res.code !== OK || !res.data) return;
-    for (const ev of parseNikonEvents(res.data)) {
-      if (ev.code === 0x4002) await this.downloadPhoto(ev.param);
-      else if (ev.code === 0x4006 && PROPS[ev.param]) await this.refreshProp(ev.param);
-      else if (ev.code === 0x4006 && ev.param === 0xd1a2) {} // live view status: handled by frame errors
-    }
-  }
-
-  // Nikon Z bodies don't reliably send DevicePropChanged when the mode dial is turned,
-  // so re-read the mode now and then and refresh as if the event had arrived.
-  async checkMode() {
-    const p = this.props[0x500e];
-    if (!p) return;
-    const res = await this.bridge.send(Op.GetDevicePropDesc, [0x500e], { dir: 'read' });
-    if (res.code !== OK) return;
-    if (parsePropDesc(res.data).current !== p.value) await this.refreshProp(0x500e);
-  }
-
-  async refreshProp(code, emit = true) {
-    const res = await this.bridge.send(Op.GetDevicePropDesc, [code], { dir: 'read' });
-    if (res.code !== OK) return;
-    const d = parsePropDesc(res.data);
-    this.props[code] = { name: PROPS[code], type: d.type, writable: d.writable, value: d.current, values: d.values, range: d.range };
+  // Called by drivers with a property in canonical codes and units.
+  updateProp(code, desc, emit = true) {
+    this.props[code] = { name: PROPS[code], ...desc };
     if (emit) this.emit('prop', { code, ...this.props[code] });
-    // Exposure mode changes which other settings are writable.
-    if (emit && code === 0x500e) for (const c of [0x5007, 0xd100, 0x5010]) await this.refreshProp(c);
   }
+
+  refreshProp(code, emit) { return this.driver.refreshProp(code, emit); }
 
   async setProp(code, value) {
     const p = this.props[code];
     if (!p) throw new Error('Unknown property');
     if (!p.writable) throw new Error(`${p.name} is read-only in the current mode`);
-    const { code: rc } = await this.bridge.send(Op.SetDevicePropValue, [code], { dir: 'write', data: encodeValue(p.type, value) });
-    await this.refreshProp(code);
-    if (rc !== OK) throw new Error(respName(rc));
+    await this.driver.setProp(code, value);
   }
 
   // Step an enum property up/down by n positions (used by voice commands).
@@ -326,12 +228,7 @@ export class Camera extends EventEmitter {
     if (next !== p.value) await this.setProp(code, next);
   }
 
-  async autofocus() {
-    const { code } = await this.bridge.send(Op.NikonAfDrive);
-    if (code !== OK) return respName(code);
-    const done = await this.waitReady(4000);
-    return done === OK ? 'OK' : respName(done);
-  }
+  autofocus() { return this.driver.autofocus(); }
 
   async shoot({ af = false } = {}) {
     if (!this.connected) throw new Error('Camera not connected');
@@ -342,10 +239,7 @@ export class Camera extends EventEmitter {
     try {
       let focus = null;
       if (af && this.liveView) focus = await this.autofocus();
-      const { code } = this.liveView
-        ? await this.bridge.send(Op.NikonInitiateCaptureRecInMedia, [0xffffffff, 0])
-        : await this.bridge.send(Op.InitiateCapture, [0, 0]);
-      if (code === OK) await this.waitReady(8000);
+      const code = await this.driver.capture({ liveView: this.liveView });
       const result = { ok: code === OK, code: respName(code), focus, at: Date.now() };
       this.emit('shot', result);
       return result;
@@ -357,6 +251,7 @@ export class Camera extends EventEmitter {
 
   async downloadPhoto(handle) {
     const info = parseObjectInfo((await this.bridge.send(Op.GetObjectInfo, [handle], { dir: 'read' })).data);
+    if (info.format === 0x3001 || !info.filename) return; // a folder, from drivers that scan for new objects
     const day = new Date().toISOString().slice(0, 10);
     const dir = join(this.capturesDir, day);
     mkdirSync(dir, { recursive: true });
