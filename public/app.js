@@ -587,6 +587,7 @@ function renderProps() {
     tile.classList.toggle('locked', locked);
     tile.querySelectorAll('.mini').forEach(b => { b.disabled = locked; });
   }
+  $('expoReset').disabled = !resetTargets(by).length;
   const mode = by.mode && fmt('mode', by.mode.value);
   $('modeHint').textContent = state.source === 'webcam' ? `Webcam: changes apply straight away.${by.mode?.writable
     ? ' Setting the shutter or ISO switches exposure to M; pick P to let the webcam expose itself again.' : ''}` : !mode ? '' :
@@ -594,6 +595,42 @@ function renderProps() {
     ['P', 'A', 'S'].includes(mode) ? `Mode ${mode}: greyed-out settings are chosen by the camera. Turn the mode dial to M for full control.` :
     'Auto/scene mode: most settings are locked. Turn the mode dial to P, A, S or M to change them here.';
 }
+
+// ---------- reset exposure to defaults ----------
+// Cameras and webcams don't report factory defaults, so these are the neutral settings. Aperture,
+// shutter, quality and size are left alone: they're choices, not drift. A webcam goes back to P
+// first, since its other controls follow from that, and its picture sliders go to mid-range,
+// where most webcams start.
+const nearest = (values, v) => values.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+const mid = p => nearest(p.values, (p.values[0] + p.values.at(-1)) / 2);
+const RESET = {
+  mode: () => state.source === 'webcam' && 2,
+  ev: () => 0,
+  wb: () => 2,
+  iso: () => 0xffff,
+  metering: () => 3,
+  focus: () => state.source === 'webcam' && 0x8011,
+  zoom: p => p.values[0],
+  pan: p => nearest(p.values, 0),
+  tilt: p => nearest(p.values, 0),
+  brightness: mid, contrast: mid, saturation: mid, sharpness: mid,
+  torch: () => 0,
+};
+function resetTargets(by = propsByName()) {
+  return Object.entries(RESET).flatMap(([name, target]) => {
+    const p = by[name];
+    if (!editable(p)) return [];
+    const v = target(p);
+    return v !== false && p.values.includes(v) && p.value !== v ? [[name, v]] : [];
+  });
+}
+$('expoReset').onclick = async () => {
+  const failed = [];
+  for (const [name, v] of resetTargets()) {
+    try { await setPropValue(name, v); } catch (e) { failed.push(`${LABEL[name]}: ${e.message}`); }
+  }
+  toast(failed.length ? failed.join(' · ') : 'Exposure settings reset', !!failed.length);
+};
 
 // ---------- gallery ----------
 const shownPhotos = new Set();
