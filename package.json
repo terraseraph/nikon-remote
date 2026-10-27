@@ -1,7 +1,7 @@
 {
   "name": "local-camera-nikon",
   "productName": "Nikon Remote",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "USB remote for Nikon cameras, with experimental Canon, Sony and generic PTP support: live view, exposure control, AI shot assist, voice and gesture triggers. Runs in the browser or as a desktop app.",
   "author": "terra seraph",
   "license": "MIT",
