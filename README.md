@@ -123,11 +123,7 @@ Then open **http://localhost:8765/** in **Chrome or Edge**. Those are needed for
 
 ## Setting up the AI features
 
-<<<<<<< HEAD
-Everything works without any keys; only shot assist and inspo are switched off. To enable them, open **More › AI** in the app on the PC, paste the keys you have and press **Save keys**. They take effect straight away, on the phone too. Each key has a **Get a key** link to the provider's sign-up page, and most have a **Test** button that checks the key with the provider.
-=======
-Everything works without any keys, including shot assist's scene presets; only its Ask AI button and inspo are switched off. To enable them, copy [`.env.example`](.env.example) to `.env` (next to `package.json`, or in `%APPDATA%\Nikon Remote` for the desktop app), fill in the keys you have, and restart.
->>>>>>> refs/heads/worktree-agent-aef62206d7065ea6a
+Everything works without any keys, including shot assist's scene presets; only its Ask AI button and inspo are switched off. To enable them, open **More › AI** in the app on the PC, paste the keys you have and press **Save keys**. They take effect straight away, on the phone too. Each key has a **Get a key** link to the provider's sign-up page, and most have a **Test** button that checks the key with the provider.
 
 | Feature | Keys (any one is enough) |
 | --- | --- |
