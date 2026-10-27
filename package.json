@@ -12,7 +12,7 @@
     "start": "node src/server.js",
     "app": "electron .",
     "dist": "electron-builder --win",
-    "test": "node test/drivers.test.js",
+    "test": "node test/drivers.test.js && node test/scenes.test.js",
     "probe": "node scripts/probe.js"
   },
   "engines": {

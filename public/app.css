@@ -322,7 +322,14 @@ input[type=range] { accent-color: var(--accent); }
 .as-ask input { flex: 1; min-width: 0; height: 44px; }
 .as-go { height: 44px; padding: 0 18px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; flex: none; }
 .as-go:disabled { opacity: .4; cursor: default; }
-.assist.busy .as-go { opacity: .7; pointer-events: none; }
+.assist.busy .as-go, .assist.busy .as-ai-go { opacity: .7; pointer-events: none; }
+/* the preset is the main action; Ask AI and its notes sit below as the optional second opinion */
+.as-form > .as-go { height: 46px; }
+.as-ai { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.as-ai-go { height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(245, 196, 0, .5); color: var(--accent); font-weight: 700; flex: none; }
+.as-ai-go:hover:not(:disabled) { background: rgba(245, 196, 0, .08); }
+.as-ai-go:disabled { opacity: .4; cursor: default; }
+.as-hint { margin: 0; color: var(--muted); font-size: 12px; }
 
 /* loading: named steps, a cancel, and a placeholder where the results will land */
 .as-busy { display: flex; flex-direction: column; gap: 10px; animation: unfold .3s var(--glide); }
@@ -344,7 +351,8 @@ input[type=range] { accent-color: var(--accent); }
 /* results: the changes first, then one line on the intent */
 .as-out { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; animation: unfold .45s var(--glide); }
 .as-out p { margin: 0; }
-.as-list { display: none; list-style: none; margin: 0; padding: 0; flex-direction: column; }
+/* shown on every screen: the chips carry the values, but the reasons need the list */
+.as-list { display: flex; list-style: none; margin: 0; padding: 0; flex-direction: column; }
 .as-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .as-list li:last-child { border-bottom: 0; }
 .as-list .nm { display: flex; align-items: center; gap: 6px; font-weight: 600; }
@@ -354,6 +362,9 @@ input[type=range] { accent-color: var(--accent); }
 .as-list .why { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 .as-list li.lk .nm, .as-list li.lk .ch b, .as-list li.lk .why { color: var(--warn); }
 .as-sum { font-size: 13.5px; }
+.as-src { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.as-mode { color: var(--muted); font-size: 12.5px; }
+.as-mode b { color: var(--fg); }
 .as-also { color: var(--muted); font-size: 12.5px; }
 .as-also b { color: var(--accent); }
 .as-warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: rgba(255, 159, 28, .1); border: 1px solid rgba(255, 159, 28, .45); color: var(--warn); font-size: 12.5px; }

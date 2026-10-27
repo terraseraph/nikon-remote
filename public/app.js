@@ -1,4 +1,5 @@
 import { fmt, LABEL } from './format.js';
+import { SCENES, CONDITIONS, MODE_INFO, presetAdvice, presetSummary } from './scenes.js';
 import { VoiceTrigger, VOICE_HELP } from './triggers/voice.js';
 import { GestureTrigger, GESTURES } from './triggers/gestures.js';
 import { ClapTrigger } from './triggers/clap.js';
@@ -428,7 +429,7 @@ export const actions = {
   record: on => setRecording(on ?? !state.recordingSince),
   zoom: dir => setZoom(dir === 'in' ? Math.min(ZOOMS.length - 1, zoomIndex + 1) : dir === 'out' ? Math.max(0, zoomIndex - 1) : (zoomIndex + 1) % ZOOMS.length),
   timelapse: on => (on ? startTimelapse() : stopTimelapse()),
-  advise: () => suggestSettings(),
+  advise: () => adviseAny(),
   applyAdvice: () => applyAdvice(),
   inspo: text => inspo.find(text),
   inspoStep: d => (inspo.photos.length ? (inspo.open(), inspo.step(d)) : toast('Say “inspo” and what you’re after first', true)),
@@ -823,20 +824,19 @@ function renderRecording() {
 }
 
 // ---------- shot assist ----------
-// Lives in the exposure bar: pick a scene (and conditions) or describe it, and the suggested
-// values show on the exposure chips with one Apply. On a phone in portrait it is a bottom sheet
-// that lists the changes itself, since the chips are too narrow to show them. Settings the mode
-// dial locks are queued and set as soon as the camera reports them writable again.
-const SCENES = [['boudoir', 'Low-light boudoir'], ['portrait', 'Portrait'], ['action', 'Action'], ['landscape', 'Landscape'],
-  ['street', 'Street'], ['event', 'Indoor event'], ['night', 'Night'], ['product', 'Product']];
-const CONDITIONS = ['Handheld', 'Tripod', 'No flash', 'Moody', 'Bright and airy', 'Freeze motion', 'Motion blur'];
+// Lives in the exposure bar: pick a scene (and conditions), then either take the scene preset
+// (generic rules from scenes.js, instant and offline) or ask the AI model, which looks at the
+// live view frame. Both produce the same advice, so the suggested values show on the exposure
+// chips with one Apply. On a phone in portrait it is a bottom sheet that lists the changes
+// itself, since the chips are too narrow to show them. Settings the mode dial locks are queued
+// and set as soon as the camera reports them writable again.
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const assist = (() => {
   try { return { scene: 'boudoir', mods: [], notes: '', ...JSON.parse(localStorage.assist || '{}') }; }
   catch { return { scene: 'boudoir', mods: [], notes: '' }; }
 })();
 const saveAssist = () => { try { localStorage.assist = JSON.stringify(assist); } catch {} };
-let advice = null;         // { intent, scene, mode, tips, model, settings: [{ name, code, value, display, reason, status }] }
+let advice = null;         // { intent, scene, mode, tips, model, source, settings: [{ name, code, value, display, reason, status }] }
 let assistOpen = false, assistReady = true;
 let asking = null;         // AbortController while a request is out
 let formOpen = true;       // scene inputs shown; folded into a one-line recap once results arrive
@@ -882,7 +882,23 @@ function syncAdvice(by) {
     }
   }
   renderApply();
-  if (assistOpen) renderAssistOut();
+  if (assistOpen) { renderAssistOut(); renderAiState(); }
+}
+
+// The preset needs only a scene; Ask AI also needs a key and a live view frame to look at.
+function aiBlocker() {
+  if (!assistReady) return 'Add an API key under More › AI to use Ask AI.';
+  if (state.connected && state.features?.liveView === false) return 'Ask AI needs live view, which this camera doesn\'t support yet.';
+  if (!state.connected || !state.wantLiveView) return 'Turn on live view to Ask AI about this exact scene.';
+  return '';
+}
+function renderAiState() {
+  const why = aiBlocker();
+  $('asAi').disabled = !!why;
+  $('asAi').title = why || 'Send the live view frame to the AI model for settings tuned to this exact scene';
+  $('asAiHint').textContent = why || 'Ask AI looks at the live view and tunes the settings to this scene. Notes only go to the AI.';
+  $('asGo').disabled = !assist.scene;
+  $('asGo').title = assist.scene ? 'Generic settings for this kind of shot, explained' : 'Pick a scene first';
 }
 
 // The same Apply appears in the bar (desktop) and in the panel (phone).
@@ -909,7 +925,7 @@ function renderAssistTags() {
   $('asScenes').replaceChildren(...SCENES.map(([id, label]) => {
     const b = document.createElement('button');
     b.className = 'tag'; b.textContent = label; b.setAttribute('aria-pressed', assist.scene === id);
-    b.onclick = () => { assist.scene = assist.scene === id ? '' : id; saveAssist(); renderAssistTags(); };
+    b.onclick = () => { assist.scene = assist.scene === id ? '' : id; saveAssist(); renderAssistTags(); renderAiState(); };
     return b;
   }));
   $('asMods').replaceChildren(...CONDITIONS.map(m => {
@@ -929,9 +945,10 @@ function renderForm() {
   $('asForm').classList.toggle('hidden', folded);
   $('asRecap').classList.toggle('hidden', !folded);
   $('asRecap').setAttribute('aria-expanded', !folded);
-  const notes = $('asNotes').value.trim();
+  const notes = advice?.source !== 'preset' && $('asNotes').value.trim();
   $('asRecapText').textContent = [sceneLabel() || 'Any scene', ...assist.mods, notes && `“${notes}”`].filter(Boolean).join(' · ');
   $('assist').classList.toggle('has-out', !!advice || !!asking);
+  renderAiState();
 }
 
 function renderAssistOut() {
@@ -941,20 +958,22 @@ function renderAssistOut() {
   const open = openSuggestions();
   const locked = open.filter(isLocked);
   const by = propsByName();
-  // Lead with the changes. The list is what phones show; on wider screens the chips carry them.
+  // Lead with the changes, each with why. The chips show the values too, but not the reasons.
   const rows = open.map(s => {
     const lk = isLocked(s), cur = by[s.name] ? fmt(s.name, by[s.name].value) : s.current;
     return `<li class="${lk ? 'lk' : ''}"><span class="nm">${lk ? LOCK : ''}${esc(LABEL[s.name] || s.name)}</span>
       <span class="ch"><span class="was">${esc(cur)}</span> → <b>${esc(s.display)}</b></span>
       ${lk || s.reason ? `<span class="why">${lk ? `After you turn the dial to ${esc(advice.mode || 'M')}${s.reason ? ' · ' : ''}` : ''}${esc(s.reason || '')}</span>` : ''}</li>`;
   }).join('');
-  const offChip = open.filter(s => !CHIP_ROWS.includes(s.name));
   const they = locked.length > 1 ? 'they will' : 'it will';
   const tips = advice.tips.length + (advice.scene ? 1 : 0);
+  const source = advice.source === 'preset' ? `${sceneLabel() || 'Scene'} preset` : `AI · ${advice.model || 'model'}`;
+  // The mode is on the dial, so it's explained rather than set.
+  const mode = MODE_INFO[advice.mode] && `<p class="as-mode"><b>${esc(advice.mode)}</b> mode, ${esc(MODE_INFO[advice.mode])}.${modeName() === advice.mode || locked.length ? '' : ` Turn the dial to ${esc(advice.mode)}.`}</p>`;
   const html = `
     ${rows ? `<ul class="as-list">${rows}</ul>` : ''}
-    ${advice.intent ? `<p class="as-sum">${esc(advice.intent)}</p>` : ''}
-    ${offChip.length ? `<p class="as-also">Also: ${offChip.map(s => `${esc(LABEL[s.name] || s.name)} → <b>${esc(s.display)}</b>`).join(' · ')}</p>` : ''}
+    ${advice.intent ? `<p class="as-sum"><span class="as-src">${esc(source)}</span>${esc(advice.intent)}</p>` : ''}
+    ${mode || ''}
     ${locked.length ? `<p class="as-warn">${LOCK}<span>${locked.map(s => `${esc(LABEL[s.name])} ${esc(s.display)}`).join(', ')}
       can't be set in ${esc(modeName())} mode. Turn the dial to ${esc(advice.mode || 'M')} and ${they} be set${locked.every(s => s.status === 'queued') ? '' : ' after you press Apply'}.</span></p>` : ''}
     ${!open.length ? '<p class="as-also">The camera matches these suggestions.</p>' : ''}
@@ -987,10 +1006,28 @@ function toggleAssist(open = !assistOpen) {
 // once, the model takes a few seconds, and reading the answer is quick.
 function setStep(text) { $('asStep').textContent = text; }
 
+const withStatus = a => ({ ...a, settings: a.settings.map(s => ({ ...s, status: s.same ? 'done' : 'pending' })) });
+
+// The scene preset: generic rules mapped onto the camera's own values, instantly and offline.
+function usePreset() {
+  toggleAssist(true);
+  if (asking) return;
+  if (!assist.scene) return toast('Pick a scene first', true);
+  if (!state.connected) return toast('Connect the camera to see preset settings', true);
+  advice = withStatus(presetAdvice(state.props, assist.scene, assist.mods));
+  formOpen = false;
+  renderProps();
+  renderAssist();
+}
+
+// Voice "suggest settings": the AI when it can see the scene, the preset otherwise.
+const adviseAny = () => (aiBlocker() ? usePreset() : suggestSettings());
+
 async function suggestSettings() {
   toggleAssist(true);
   if (asking) return;
-  if (!assistReady) return toast('Add an API key under More › AI on the laptop to use shot assist', true);
+  const blocked = aiBlocker();
+  if (blocked) return toast(blocked, true);
   const ctl = asking = new AbortController();
   formOpen = false;
   $('assist').classList.add('busy'); $('assistBtn').classList.add('busy');
@@ -1000,13 +1037,15 @@ async function suggestSettings() {
   renderAssist();
   const timer = setTimeout(() => setStep(`Asking ${modelLabel()}…`), 700);
   try {
-    const notes = [...assist.mods, $('asNotes').value.trim()].filter(Boolean).join('; ');
+    // The preset goes last as a starting point, so the server's length cap trims it before the user's notes.
+    const preset = assist.scene && presetAdvice(state.props, assist.scene, assist.mods);
+    const notes = [...assist.mods, $('asNotes').value.trim(), preset && presetSummary(preset)].filter(Boolean).join('; ');
     const r = await api('/api/advise', { scene: assist.scene, notes, model: $('advModel').value }, { signal: ctl.signal });
     clearTimeout(timer);
     setStep('Reading settings…');
     await sleep(350);
     if (ctl.signal.aborted) return;
-    advice = { ...r, settings: r.settings.map(s => ({ ...s, status: s.same ? 'done' : 'pending' })) };
+    advice = withStatus({ ...r, source: 'ai' });
   } catch (e) {
     if (e.name === 'AbortError') toast('Cancelled');
     else toast(e.message, true);
@@ -1024,7 +1063,7 @@ async function suggestSettings() {
 // One tap: set everything the dial allows now, queue the rest.
 async function applyAdvice() {
   const pending = advice?.settings.filter(s => s.status === 'pending') || [];
-  if (!pending.length) return toast(advice ? 'Nothing left to apply' : 'Ask shot assist for suggestions first', !advice);
+  if (!pending.length) return toast(advice ? 'Nothing left to apply' : 'Pick a scene in shot assist first', !advice);
   const failed = [], queued = [];
   for (const s of pending) {
     if (isLocked(s)) { s.status = 'queued'; queued.push(LABEL[s.name]); continue; }
@@ -1050,7 +1089,8 @@ async function setPropValue(name, v) {
 
 $('assistBtn').onclick = () => toggleAssist();
 $('asClose').onclick = () => toggleAssist(false);
-$('asGo').onclick = suggestSettings;
+$('asGo').onclick = usePreset;
+$('asAi').onclick = suggestSettings;
 $('asCancel').onclick = () => asking?.abort();
 $('asApply').onclick = $('asApplyPanel').onclick = applyAdvice;
 $('asDiscard').onclick = $('asDiscardPanel').onclick = discardAdvice;
@@ -1058,9 +1098,9 @@ $('asRecap').onclick = () => { formOpen = true; renderAssistTags(); renderForm()
 $('asModel').onclick = () => { toggleAssist(false); toggleAdv(true, 'advisor'); };
 $('asNotes').value = assist.notes;
 $('asNotes').oninput = () => { assist.notes = $('asNotes').value; saveAssist(); };
-$('asNotes').onkeydown = e => { if (e.key === 'Enter') suggestSettings(); else if (e.key === 'Escape') toggleAssist(false); };
+$('asNotes').onkeydown = e => { if (e.key === 'Enter' && !$('asAi').disabled) suggestSettings(); else if (e.key === 'Escape') toggleAssist(false); };
 $('viewport').addEventListener('animationend', e => { if (e.animationName === 'sendFrame') $('viewport').classList.remove('sending'); });
-const showModel = () => { $('asModel').textContent = `Model: ${modelLabel()}`; };
+const showModel = () => { $('asModel').textContent = `AI model: ${modelLabel()}`; };
 $('advModel').onchange = () => { try { localStorage.advModel = $('advModel').value; } catch {} showModel(); };
 // Run again when keys are saved (the 'config' event), so the picker follows without a reload.
 const advHintText = $('advHint').textContent;
@@ -1069,9 +1109,10 @@ const loadAdvisor = () => api('/api/advisor').then(c => {
   try { if (c.models.some(m => m.id === localStorage.advModel)) $('advModel').value = localStorage.advModel; } catch {}
   showModel();
   assistReady = !!c.provider;
-  $('advModel').disabled = $('asGo').disabled = !assistReady;
-  $('advHint').textContent = assistReady ? advHintText : 'Shot assist needs one of the API keys below.';
-  if (!assistReady) $('asModel').textContent = 'Not set up: add an API key';
+  $('advModel').disabled = !assistReady;
+  $('asModel').classList.toggle('hidden', !assistReady); // without a key, the hint under Ask AI says what to do
+  $('advHint').textContent = assistReady ? advHintText : 'Ask AI in shot assist needs one of the API keys below. Scene presets work without one.';
+  renderAiState();
 }).catch(() => {});
 loadAdvisor();
 
@@ -1237,7 +1278,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'o') $('rotateBtn').click();
   else if (k === 'h') $('flipBtn').click();
   else if (k === 'r') actions.record();
-  else if (k === 'a') actions.advise();
+  else if (k === 'a') toggleAssist();
   else if (k === 'i') { e.preventDefault(); inspo.toggle(); }
   else if ((k === '[' || k === ']') && inspo.isOpen) inspo.step(k === ']' ? 1 : -1);
   else if (k === 'm') toggleAdv();
