@@ -1,17 +1,18 @@
 // High-level camera control on top of the PTP bridge: connection lifecycle, live view,
 // capture, settings and auto-download of new photos. Emits 'state', 'prop', 'photo', 'shot', 'log'.
 // Brand-specific operations live in drivers/, picked from the camera's DeviceInfo.
-import { EventEmitter } from 'node:events';
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Bridge } from './bridge.js';
 import { Op, OK, respName, parseDeviceInfo, parseObjectInfo } from './ptp.js';
 import { PROPS, sleep } from './drivers/ptp.js';
 import { pickDriver } from './drivers/index.js';
+import { FrameSource } from './frames.js';
+import { dayDir, freeName, photoEntry, listPhotos } from './photos.js';
 
 export { PROPS };
 
-export class Camera extends EventEmitter {
+export class Camera extends FrameSource {
   constructor({ capturesDir, thumbsDir = join(capturesDir, '.thumbs') }) {
     super();
     this.capturesDir = capturesDir;
@@ -24,13 +25,8 @@ export class Camera extends EventEmitter {
     this.props = {};
     this.liveView = false;     // live view actually running on the camera
     this.wantLiveView = true;  // user preference
-    this.viewers = new Set();  // MJPEG responses
     this.capturing = false;
     this.recordingSince = null; // ms timestamp while a movie is recording
-    this.frame = null;
-    this.frameSeq = 0;         // counts frames, so pulling viewers can ask for the next new one
-    this.lastPull = 0;         // when a viewer last pulled a single frame
-    this.pullWaiters = [];     // pending pulls, released one per new frame
     this.smallFrames = false;  // 640px instead of 1024px live view, while someone pulls remotely
     this.driver = null;
     this.bridge = new Bridge();
@@ -95,11 +91,10 @@ export class Camera extends EventEmitter {
           await sleep(250);
           continue;
         }
-        const streaming = this.wantLiveView && (this.viewers.size > 0 || Date.now() - this.lastPull < 3000);
+        const streaming = this.wantLiveView && (this.viewers.size > 0 || this.pulling);
         if (streaming && !this.liveView) await this.startLiveView();
         if (!streaming && this.liveView && !this.recordingSince) await this.stopLiveView();
-        const remote = Date.now() - this.lastPull < 3000;
-        if (this.liveView && remote !== this.smallFrames) await this.setFrameSize(remote);
+        if (this.liveView && this.pulling !== this.smallFrames) await this.setFrameSize(this.pulling);
         if (this.liveView && !this.capturing) await this.pumpFrame();
         if (Date.now() - lastEvents > 250) { lastEvents = Date.now(); await this.driver.pollEvents(); }
         if (Date.now() - lastModeCheck > 1000 && !this.capturing) { lastModeCheck = Date.now(); await this.driver.checkMode(); }
@@ -120,7 +115,7 @@ export class Camera extends EventEmitter {
     } catch (e) {
       this.emit('log', `Live view: ${e.message}`); this.wantLiveView = false; return this.emitState();
     }
-    await this.setFrameSize(Date.now() - this.lastPull < 3000);
+    await this.setFrameSize(this.pulling);
     this.liveView = true;
     this.emitState();
   }
@@ -139,34 +134,13 @@ export class Camera extends EventEmitter {
   async pumpFrame() {
     const f = await this.driver.getFrame();
     if (f?.stopped) { this.liveView = false; return; } // camera dropped live view
-    if (!f) return;
-    this.frame = f.jpeg;
-    this.frameMeta = f.af || null;
-    this.frameSeq++;
-    for (const viewer of this.viewers) writeFrame(viewer, this.frame, this.frameMeta);
-    this.pullWaiters[0]?.();
+    if (f) this.pushFrame(f.jpeg, f.af || null);
   }
 
   // Smaller frames while someone watches over the internet, where frame size sets the frame rate.
   async setFrameSize(small) {
     this.smallFrames = small;
     await this.driver.setFrameSize(small);
-  }
-
-  // For viewers on slow links: the newest frame after `after`, waiting briefly for one.
-  // Pulling one frame at a time means frames can never pile up in a buffer between here
-  // and the viewer, which is what makes a pushed MJPEG stream fall seconds behind.
-  async pullFrame(after, timeoutMs = 2000) {
-    this.lastPull = Date.now();
-    if (!this.frame || this.frameSeq <= after) {
-      // One waiter per new frame, so a viewer with two requests in flight gets two different frames.
-      await new Promise(resolve => {
-        const done = () => { clearTimeout(timer); this.pullWaiters = this.pullWaiters.filter(w => w !== done); resolve(); };
-        const timer = setTimeout(done, timeoutMs);
-        this.pullWaiters.push(done);
-      });
-    }
-    return this.frame && this.frameSeq > after ? { jpeg: this.frame, seq: this.frameSeq, af: this.frameMeta } : null;
   }
 
   // Move the AF point to a spot given as fractions (0–1) of the live view, then optionally focus.
@@ -192,16 +166,6 @@ export class Camera extends EventEmitter {
       this.recordingSince = null;
       this.emitState();
     }
-  }
-
-  addViewer(res) {
-    res.writeHead(200, {
-      'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-      'Cache-Control': 'no-store', Connection: 'close',
-    });
-    this.viewers.add(res);
-    if (this.frame) writeFrame(res, this.frame, this.frameMeta);
-    res.on('close', () => this.viewers.delete(res));
   }
 
   // Called by drivers with a property in canonical codes and units.
@@ -252,11 +216,8 @@ export class Camera extends EventEmitter {
   async downloadPhoto(handle) {
     const info = parseObjectInfo((await this.bridge.send(Op.GetObjectInfo, [handle], { dir: 'read' })).data);
     if (info.format === 0x3001 || !info.filename) return; // a folder, from drivers that scan for new objects
-    const day = new Date().toISOString().slice(0, 10);
-    const dir = join(this.capturesDir, day);
-    mkdirSync(dir, { recursive: true });
-    let file = info.filename;
-    for (let n = 1; existsSync(join(dir, file)); n++) file = info.filename.replace(/(\.\w+)$/, `_${n}$1`);
+    const { day, dir } = dayDir(this.capturesDir);
+    const file = freeName(dir, info.filename);
     const thumb = await this.bridge.send(Op.GetThumb, [handle], { dir: 'read' });
     if (thumb.code === OK) writeFileSync(join(this.thumbsDir, `${day}_${file}.jpg`), thumb.data);
     const res = await this.bridge.send(Op.GetObject, [handle], { dir: 'read', file: join(dir, file) });
@@ -265,40 +226,10 @@ export class Camera extends EventEmitter {
     this.emit('photo', photo);
   }
 
-  listPhotos(limit = 60) {
-    const out = [];
-    const days = existsSync(this.capturesDir) ? readdirSync(this.capturesDir).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse() : [];
-    for (const day of days) {
-      const files = readdirSync(join(this.capturesDir, day))
-        .map(f => ({ f, t: statSync(join(this.capturesDir, day, f)).mtimeMs }))
-        .sort((a, b) => b.t - a.t);
-      for (const { f } of files) {
-        out.push(photoEntry(day, f, statSync(join(this.capturesDir, day, f)).size));
-        if (out.length >= limit) return out;
-      }
-    }
-    return out;
-  }
+  listPhotos(limit) { return listPhotos(this.capturesDir, limit); }
 
   async close() {
     if (this.liveView) await this.stopLiveView().catch(() => {});
     this.bridge.stop();
   }
-}
-
-function photoEntry(day, file, size) {
-  const isJpeg = /\.jpe?g$/i.test(file);
-  return {
-    name: file, day, size, video: /\.(mov|mp4)$/i.test(file),
-    url: `/captures/${day}/${encodeURIComponent(file)}`,
-    thumb: `/captures/.thumbs/${day}_${encodeURIComponent(file)}.jpg`,
-    preview: isJpeg ? `/captures/${day}/${encodeURIComponent(file)}` : `/captures/.thumbs/${day}_${encodeURIComponent(file)}.jpg`,
-  };
-}
-
-function writeFrame(res, jpeg, meta) {
-  const af = meta ? `X-AF: ${meta.x},${meta.y},${meta.w},${meta.h}\r\n` : '';
-  res.write(`--frame\r\nContent-Type: image/jpeg\r\n${af}Content-Length: ${jpeg.length}\r\n\r\n`);
-  res.write(jpeg);
-  res.write('\r\n');
 }
