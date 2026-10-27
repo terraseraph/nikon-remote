@@ -6,6 +6,7 @@ import { ClapTrigger } from './triggers/clap.js';
 import { LiveView } from './liveview.js';
 import { Inspo } from './inspo.js';
 import { PoseMatch } from './pose.js';
+import { WebcamHost } from './webcam.js';
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -400,8 +401,10 @@ api('/api/presets').then(setPresets).catch(() => {});
 const PROP = { aperture: 0x5007, shutter: 0xd100, iso: 0x500f, ev: 0x5010 };
 
 async function step(name, delta) {
+  // A webcam without exposure compensation brightens with its brightness control instead.
+  if (name === 'ev' && !state.props[PROP.ev] && propsByName().brightness) name = 'brightness';
   try {
-    const p = await api('/api/prop/step', { code: PROP[name], delta });
+    const p = await api('/api/prop/step', { code: PROP[name] ?? propsByName()[name].code, delta });
     toast(`${LABEL[name]}: ${fmt(name, p.value)}`);
   } catch (e) { toast(e.message, true); }
 }
@@ -440,24 +443,33 @@ export const actions = {
 };
 
 // ---------- rendering ----------
+function cameraLabel(brand, model = '') {
+  model = model.replace(/_(\d)$/, (_, n) => 'I'.repeat(+n)); // "Z50_2" → "Z50II"
+  // Some brands repeat their name in the model ("Canon EOS R6"), so it's only added when missing.
+  return `${brand && !model.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ` : ''}${model}`;
+}
+
 function render() {
   $('connDot').classList.toggle('on', state.connected);
-  const model = (state.model || state.name || '').replace(/_(\d)$/, (_, n) => 'I'.repeat(+n)); // "Z50_2" → "Z50II"
-  // Some brands repeat their name in the model ("Canon EOS R6"), so it's only added when missing.
-  const brand = state.brand && !model.toLowerCase().startsWith(state.brand.toLowerCase()) ? `${state.brand} ` : '';
-  $('camName').textContent = state.connected ? `${brand}${model}${state.experimental ? ' (experimental)' : ''}` : (state.error || 'Camera disconnected');
+  $('camName').textContent = state.connected ? `${cameraLabel(state.brand, state.model || state.name || '')}${state.experimental ? ' (experimental)' : ''}` : (state.error || 'Camera disconnected');
   $('lvBtn').classList.toggle('active', !!state.wantLiveView);
   $('lvBtn').setAttribute('aria-pressed', !!state.wantLiveView);
   const showLv = state.connected && state.wantLiveView;
   $('viewport').classList.toggle('hidden', !showLv);
   $('lvPlaceholder').classList.toggle('hidden', showLv);
-  $('lvPlaceholder').textContent = state.connected ? 'Live view off — press L or the Live view button' : 'Plug in the camera and switch it on';
+  $('lvPlaceholder').textContent = state.connected ? 'Live view off — press L or the Live view button'
+    : state.source !== 'webcam' ? 'Plug in the camera and switch it on'
+    : isLaptop ? 'Pick the webcam in the source list above to start it' : 'The webcam runs from the laptop: open Nikon Remote there and pick it';
+  $('viewport').title = state.features?.focusPoint === false ? '' : 'Tap to focus here';
+  renderSources();
   showLv ? liveView.start() : liveView.stop();
   renderRecording();
   renderProps();
 }
 
-const EXPOSURE_ROWS = ['aperture', 'shutter', 'iso', 'ev', 'wb', 'metering', 'focus', 'quality', 'size'];
+// The webcam ones (mode first, then its own controls) only show when a webcam reports them.
+const EXPOSURE_ROWS = ['mode', 'aperture', 'shutter', 'iso', 'ev', 'wb', 'metering', 'focus', 'quality', 'size',
+  'kelvin', 'focusDist', 'brightness', 'contrast', 'saturation', 'sharpness', 'zoom', 'pan', 'tilt', 'torch'];
 const CHIP_ROWS = ['aperture', 'shutter', 'iso', 'ev', 'wb', 'focus'];
 const MINUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg>';
 const PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>';
@@ -558,7 +570,8 @@ function renderProps() {
   renderRuler(by);
 
   for (const tile of $('exposure').children) {
-    const p = by[tile.dataset.name];
+    let p = by[tile.dataset.name];
+    if (tile.dataset.name === 'mode' && !p?.writable) p = null; // a camera's mode is on its dial
     tile.classList.toggle('hidden', !p);
     if (!p) continue;
     const sel = tile.querySelector('select'), values = p.values?.length ? p.values : [p.value];
@@ -575,7 +588,8 @@ function renderProps() {
     tile.querySelectorAll('.mini').forEach(b => { b.disabled = locked; });
   }
   const mode = by.mode && fmt('mode', by.mode.value);
-  $('modeHint').textContent = !mode ? '' :
+  $('modeHint').textContent = state.source === 'webcam' ? `Webcam: changes apply straight away.${by.mode?.writable
+    ? ' Setting the shutter or ISO switches exposure to M; pick P to let the webcam expose itself again.' : ''}` : !mode ? '' :
     mode === 'M' ? 'Manual: aperture, shutter and ISO are all yours.' :
     ['P', 'A', 'S'].includes(mode) ? `Mode ${mode}: greyed-out settings are chosen by the camera. Turn the mode dial to M for full control.` :
     'Auto/scene mode: most settings are locked. Turn the mode dial to P, A, S or M to change them here.';
@@ -969,7 +983,7 @@ function renderAssistOut() {
   const tips = advice.tips.length + (advice.scene ? 1 : 0);
   const source = advice.source === 'preset' ? `${sceneLabel() || 'Scene'} preset` : `AI · ${advice.model || 'model'}`;
   // The mode is on the dial, so it's explained rather than set.
-  const mode = MODE_INFO[advice.mode] && `<p class="as-mode"><b>${esc(advice.mode)}</b> mode, ${esc(MODE_INFO[advice.mode])}.${modeName() === advice.mode || locked.length ? '' : ` Turn the dial to ${esc(advice.mode)}.`}</p>`;
+  const mode = state.source !== 'webcam' && MODE_INFO[advice.mode] && `<p class="as-mode"><b>${esc(advice.mode)}</b> mode, ${esc(MODE_INFO[advice.mode])}.${modeName() === advice.mode || locked.length ? '' : ` Turn the dial to ${esc(advice.mode)}.`}</p>`;
   const html = `
     ${rows ? `<ul class="as-list">${rows}</ul>` : ''}
     ${advice.intent ? `<p class="as-sum"><span class="as-src">${esc(source)}</span>${esc(advice.intent)}</p>` : ''}
@@ -1199,7 +1213,66 @@ $('phoneBtn').onclick = () => showPhoneDialog().catch(e => toast(e.message, true
 $('phoneClose').onclick = () => $('phoneDialog').close();
 $('phoneDialog').addEventListener('close', () => clearTimeout(tunnelPoll));
 // Only the laptop itself may see the access key, so the button only appears there.
-api('/api/remote').then(() => $('phoneBtn').classList.remove('hidden')).catch(() => {});
+let isLaptop = false;
+api('/api/remote').then(() => { isLaptop = true; $('phoneBtn').classList.remove('hidden'); initWebcamHost(); }).catch(() => {});
+
+// ---------- camera source: the USB camera or one of the laptop's webcams ----------
+// The laptop's page runs a picked webcam (webcam.js) and remembers the pick, so the desktop window
+// reopens it next time. Phones see the same list, but only the laptop can start a webcam.
+const remember = v => { try { localStorage.source = v; } catch {} };
+const remembered = () => { try { return localStorage.source || 'camera'; } catch { return 'camera'; } };
+let laptopWebcams = [];
+const host = new WebcamHost({
+  onReleased: (reason, forget) => { if (forget) remember('camera'); toast(reason); renderSources(true); },
+  onError: msg => { toast(msg, true); renderSources(true); },
+});
+
+function renderSources(force = false) {
+  const sel = $('sourceSel'), usb = state.usbCamera || {};
+  const usbLabel = usb.connected ? `USB: ${cameraLabel(usb.brand, usb.model)}` : 'USB camera';
+  const cams = [...(isLaptop ? laptopWebcams : state.webcams || [])];
+  const value = state.source === 'webcam' ? `webcam:${state.webcamId}` : 'camera';
+  if (state.source === 'webcam' && !cams.some(c => c.id === state.webcamId)) cams.push({ id: state.webcamId, label: state.name || 'Webcam' });
+  const sig = JSON.stringify([usbLabel, cams, value, isLaptop]);
+  if (!force && sel.dataset.sig === sig) return;
+  sel.dataset.sig = sig;
+  const group = document.createElement('optgroup');
+  group.label = isLaptop ? 'Webcams' : 'Webcams (pick one on the laptop)';
+  group.append(...cams.map(c => Object.assign(new Option(c.label, `webcam:${c.id}`), { disabled: !isLaptop })));
+  sel.replaceChildren(new Option(usbLabel, 'camera'), ...(cams.length ? [group] : []));
+  sel.value = value;
+}
+
+async function refreshWebcams() {
+  laptopWebcams = await host.devices();
+  // A tab without camera permission only knows "Webcam"; it shouldn't replace the host's named list.
+  if (laptopWebcams.some(c => c.id)) await api('/api/webcam/devices', { devices: laptopWebcams }).catch(() => {});
+  renderSources();
+}
+
+async function startWebcam(id) {
+  try {
+    await host.start(id);
+    remember(`webcam:${host.deviceId}`);
+    refreshWebcams(); // names appear once the camera permission is granted
+  } catch (e) { toast(e.message, true); renderSources(true); }
+}
+
+$('sourceSel').onchange = async () => {
+  const v = $('sourceSel').value;
+  if (v.startsWith('webcam:')) return startWebcam(v.slice(7));
+  remember('camera');
+  await api('/api/source', { source: 'camera' }).catch(e => toast(e.message, true));
+  host.stop();
+};
+
+async function initWebcamHost() {
+  await refreshWebcams();
+  navigator.mediaDevices?.addEventListener('devicechange', refreshWebcams);
+  const want = remembered(), s = await api('/api/state').catch(() => ({}));
+  // Another window may be running the webcam already; only picking it here takes over.
+  if (want.startsWith('webcam:') && laptopWebcams.some(c => c.id === want.slice(7)) && !(s.source === 'webcam' && s.connected)) startWebcam(want.slice(7));
+}
 
 // ---------- API keys (More › AI) ----------
 // Laptop only: the server refuses other devices, which get a note instead of the form.

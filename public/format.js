@@ -1,4 +1,4 @@
-// Human-readable labels for Nikon/PTP property values.
+// Human-readable labels for Nikon/PTP property values, and for webcam controls (webcam-props.js).
 
 const MODE = { 1: 'M', 2: 'P', 3: 'A', 4: 'S', 0x8010: 'AUTO', 0x8011: 'Portrait', 0x8012: 'Landscape', 0x8013: 'Close-up', 0x8014: 'Sports' };
 const WB = { 2: 'Auto', 4: 'Daylight', 5: 'Fluorescent', 6: 'Incandescent', 7: 'Flash', 0x8010: 'Cloudy', 0x8011: 'Shade', 0x8012: 'Kelvin', 0x8013: 'Preset', 0x8016: 'Natural light auto' };
@@ -17,6 +17,9 @@ function shutter(v) {
   return `${num}/${den}`;
 }
 
+// Webcam sliders come in each device's own units, so they show as plain numbers.
+const num = v => String(+(+v).toFixed(2));
+
 const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n).toFixed(1);
 
 export const FORMAT = {
@@ -31,11 +34,19 @@ export const FORMAT = {
   quality: v => QUALITY[v] ?? `Quality ${v}`,
   size: v => String(v).replace('x', ' × '),
   battery: v => `🔋 ${v}%`,
+  kelvin: v => `${v} K`,
+  focusDist: num, brightness: num, contrast: num, saturation: num, sharpness: num,
+  zoom: num,
+  pan: v => `${+(v / 3600).toFixed(1)}°`, // the browser gives pan and tilt in arc-seconds
+  tilt: v => `${+(v / 3600).toFixed(1)}°`,
+  torch: v => (v ? 'On' : 'Off'),
 };
 
 export const LABEL = {
   aperture: 'Aperture', shutter: 'Shutter', iso: 'ISO', ev: 'Exp. comp', wb: 'White bal.',
-  metering: 'Metering', focus: 'Focus', quality: 'Quality', size: 'Image size',
+  metering: 'Metering', focus: 'Focus', quality: 'Quality', size: 'Image size', mode: 'Exposure',
+  kelvin: 'Colour temp.', focusDist: 'Focus distance', brightness: 'Brightness', contrast: 'Contrast',
+  saturation: 'Saturation', sharpness: 'Sharpness', zoom: 'Zoom', pan: 'Pan', tilt: 'Tilt', torch: 'Light',
 };
 
 export const fmt = (name, v) => (FORMAT[name] ? FORMAT[name](v) : String(v));

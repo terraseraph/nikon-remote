@@ -92,10 +92,11 @@ Suggest settings for the scene the photographer describes. Rules:
 Reply with JSON only, no prose around it:
 {"intent": "<the approach in one short line, at most 12 words, e.g. 'Open up and lift ISO to keep it handheld'>", "scene": "<one or two sentences on the light and subject you see>", "mode": "<M|A|S|P or empty>", "settings": {"<setting>": "<option>", ...}, "reasons": {"<setting>": "<short why>"}, "tips": ["<short tip>", ...]}`;
 
-function describeSettings(props) {
+function describeSettings(props, webcam) {
   const lines = [];
   const mode = Object.values(props).find(p => p.name === 'mode');
-  if (mode) lines.push(`mode: ${fmt('mode', mode.value)} (set on the camera's dial)`);
+  // A webcam has no dial: setting the shutter or ISO is what switches it to manual exposure.
+  if (mode) lines.push(`mode: ${fmt('mode', mode.value)} ${webcam ? '(a webcam: P exposes itself, setting shutter or ISO switches it to M; no aperture)' : '(set on the camera\'s dial)'}`);
   for (const name of ADJUSTABLE) {
     const p = Object.values(props).find(q => q.name === name);
     if (!p) continue;
@@ -170,7 +171,7 @@ export async function advise(camera, { scene, notes = '', model }) {
     `Scene: ${SCENES[scene] || scene || 'General photography'}`,
     notes && `Photographer's notes: ${notes}`,
     `Camera: ${camera.info?.manufacturer || ''} ${camera.info?.model || ''}`,
-    `Current settings:\n${describeSettings(camera.props)}`,
+    `Current settings:\n${describeSettings(camera.props, camera.isWebcam)}`,
   ].filter(Boolean).join('\n\n');
 
   const reply = parseJson(await callModel(config, SYSTEM, text, jpeg));

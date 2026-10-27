@@ -34,6 +34,8 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(60, 207, 110, .55); } 70% { box-shadow: 0 0 0 8px rgba(60, 207, 110, 0); } 100% { box-shadow: 0 0 0 0 rgba(60, 207, 110, 0); } }
 .pill { height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pill b { color: var(--fg); font-weight: 600; }
+.srcsel { height: 30px; max-width: 200px; padding: 0 26px 0 10px; border-radius: 999px; font-size: 12px; color: var(--muted); flex: 0 1 auto; min-width: 0; text-overflow: ellipsis;
+  appearance: none; background: var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239d9daa' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") right 8px center / 12px no-repeat; }
 .bgroup { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 2px; flex: none; }
 .tbtn { height: 40px; min-width: 44px; padding: 0 12px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 500; transition: background .25s var(--ease), color .25s; }
 .tbtn:hover { color: var(--fg); }
@@ -665,3 +667,6 @@ dialog[open] { animation: dlg .35s var(--spring); }
   .in-nav { width: 28px; height: 28px; }
   .pose-hud { top: 48px; left: 8px; transform: none; max-width: calc(100% - 174px); font-size: 12px; }
 }
+
+/* The camera name shows the error or model; the source list only needs to say which one. */
+@media (max-width: 820px) { .srcsel { max-width: 30vw; min-width: 64px; flex-shrink: 4; } }

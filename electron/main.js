@@ -49,6 +49,9 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1400, height: 900, minWidth: 420, minHeight: 600,
     title: 'Nikon Remote', backgroundColor: '#111111', autoHideMenuBar: true,
+    // With a webcam picked, this window is the camera: phones watch the frames it sends, so it
+    // has to keep capturing at full rate when minimised or behind other windows.
+    webPreferences: { backgroundThrottling: false },
   });
   win.loadURL(appUrl());
   // Photo credits, "Get a key" and other target=_blank links open in the default browser, not
@@ -82,10 +85,13 @@ function buildMenu() {
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 
 app.whenReady().then(async () => {
-  // Microphone and webcam are only needed for clap and webcam gestures, from our own page.
+  // Microphone and webcam are only for our own page: clap, webcam gestures, a webcam as the camera
+  // and its video sound. The check handler lets that page list webcams by name and see it may use them.
+  const ours = url => { try { return new URL(url).hostname === '127.0.0.1'; } catch { return false; } };
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
-    cb(['media', 'clipboard-sanitized-write'].includes(permission) && new URL(wc.getURL()).hostname === '127.0.0.1');
+    cb(['media', 'clipboard-sanitized-write'].includes(permission) && ours(wc.getURL()));
   });
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => ['media', 'clipboard-sanitized-write'].includes(permission) && ours(origin));
   try {
     await startServer();
   } catch (e) {

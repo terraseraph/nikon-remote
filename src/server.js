@@ -9,6 +9,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { Camera } from './camera.js';
+import { Webcam } from './webcam.js';
 import { Tunnel } from './tunnel.js';
 import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
@@ -36,7 +37,7 @@ const PRESETS_FILE = join(DATA, 'presets.json');
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json',
-  '.nef': 'application/octet-stream', '.mov': 'video/quicktime', '.mp4': 'video/mp4',
+  '.nef': 'application/octet-stream', '.mov': 'video/quicktime', '.mp4': 'video/mp4', '.webm': 'video/webm',
 };
 
 // Persisted so a phone that scanned once stays signed in across restarts.
@@ -59,14 +60,38 @@ function picturesDir() {
 }
 
 const camera = new Camera({ capturesDir: CAPTURES, thumbsDir: THUMBS });
+const webcam = new Webcam({ capturesDir: CAPTURES, thumbsDir: THUMBS });
 const clients = new Set();
+
+// Which source the shutter, settings and live view belong to. A webcam is picked on the laptop,
+// whose page then runs it; the USB camera stays connected in the background meanwhile, so photos
+// taken with its own shutter button still download, but with no viewers its live view stops.
+let selected = 'camera';
+const active = () => (selected === 'webcam' ? webcam : camera);
+let webcams = []; // the laptop's video devices, as its page last reported them, for the picker on phones
+function fullState() {
+  return {
+    ...active().state(), source: selected, webcamId: webcam.deviceId, webcams,
+    usbCamera: { connected: camera.connected, brand: camera.driver?.brand, model: camera.info?.model || camera.name },
+  };
+}
+function select(source) {
+  if (source === selected) return;
+  selected = source;
+  if (source === 'camera') webcam.release('Switched to the USB camera', true);
+  broadcast('state', fullState());
+}
 
 function broadcast(type, data) {
   const msg = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) res.write(msg);
 }
-for (const type of ['state', 'prop', 'photo', 'shot']) camera.on(type, d => broadcast(type, d));
-camera.on('log', m => { console.log(m); broadcast('log', m); });
+for (const src of [camera, webcam]) {
+  src.on('state', () => broadcast('state', fullState()));
+  src.on('photo', d => broadcast('photo', d)); // one gallery for both
+  for (const type of ['prop', 'shot']) src.on(type, d => src === active() && broadcast(type, d));
+  src.on('log', m => { console.log(m); broadcast('log', m); });
+}
 // Proxies such as Cloudflare drop connections that stay silent for ~100 s; an SSE comment keeps them open.
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25_000).unref();
 
@@ -108,6 +133,18 @@ function savePresets(list) {
   writeFileSync(PRESETS_FILE, JSON.stringify(clean, null, 2));
   broadcast('presets', clean);
   return clean;
+}
+
+// Uploads from the webcam host, capped so a runaway request can't fill memory.
+async function raw(req, max) {
+  if (+req.headers['content-length'] > max) throw new Error('Upload too large');
+  const chunks = [];
+  let n = 0;
+  for await (const chunk of req) {
+    if ((n += chunk.length) > max) throw new Error('Upload too large');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function body(req) {
@@ -156,9 +193,9 @@ function lanUrls() {
 // JPEGs are high quality; re-encoding at 60 makes them about a third of the size (~21 KB at
 // 640px) for ~26 ms of CPU. The last result is kept, so each frame is only encoded once.
 let shrunk = { seq: 0, jpeg: null };
-function shrink(f) {
-  if (shrunk.seq !== f.seq) {
-    try { shrunk = { seq: f.seq, jpeg: jpeg.encode(jpeg.decode(f.jpeg, { useTArray: true }), 60).data }; }
+function shrink(f, src) {
+  if (shrunk.seq !== f.seq || shrunk.src !== src) {
+    try { shrunk = { seq: f.seq, src, jpeg: jpeg.encode(jpeg.decode(f.jpeg, { useTArray: true }), 60).data }; }
     catch { return f.jpeg; }
   }
   return shrunk.jpeg;
@@ -178,20 +215,26 @@ function deny(res) {
 
 // ---------- routes ----------
 const routes = {
-  'GET /api/state': () => camera.state(),
+  'GET /api/state': () => fullState(),
   'GET /api/photos': () => camera.listPhotos(),
-  'POST /api/shoot': b => camera.shoot({ af: !!b.af }),
-  'POST /api/af': async () => ({ result: await camera.autofocus() }),
-  'POST /api/focus-point': b => camera.setFocusPoint(+b.x, +b.y, { focus: b.focus !== false }),
-  'POST /api/movie': b => (b.on ? camera.startMovie() : camera.stopMovie()).then(() => camera.state()),
-  'POST /api/liveview': b => camera.setLiveView(b.on).then(() => camera.state()),
-  'POST /api/prop': b => camera.setProp(+b.code, b.value).then(() => camera.props[+b.code]),
-  'POST /api/prop/step': b => camera.stepProp(+b.code, +b.delta).then(() => camera.props[+b.code]),
+  'POST /api/shoot': b => active().shoot({ af: !!b.af }),
+  'POST /api/af': async () => ({ result: await active().autofocus() }),
+  'POST /api/focus-point': b => active().setFocusPoint(+b.x, +b.y, { focus: b.focus !== false }),
+  'POST /api/movie': b => (b.on ? active().startMovie() : active().stopMovie()).then(fullState),
+  'POST /api/liveview': b => active().setLiveView(b.on).then(fullState),
+  'POST /api/prop': b => active().setProp(+b.code, b.value).then(() => active().props[+b.code]),
+  'POST /api/prop/step': b => active().stepProp(+b.code, +b.delta).then(() => active().props[+b.code]),
   'GET /api/advisor': () => ({ ...advisorConfig(), scenes: Object.keys(SCENES) }),
-  'POST /api/advise': b => advise(camera, { scene: b.scene, notes: String(b.notes || '').slice(0, 500), model: b.model }),
+  'POST /api/advise': b => advise(active(), { scene: b.scene, notes: String(b.notes || '').slice(0, 500), model: b.model }),
   'GET /api/inspo': () => inspoConfig(),
-  'POST /api/inspo': b => findInspo(camera, { request: b.request, model: b.model }),
-  'POST /api/reconnect': () => camera.reconnect().then(() => camera.state()),
+  'POST /api/inspo': b => findInspo(active(), { request: b.request, model: b.model }),
+  'POST /api/reconnect': () => active().reconnect().then(fullState),
+  // Any device can go back to the USB camera; a webcam can only be picked on the laptop, which runs it.
+  'POST /api/source': b => {
+    if (b.source !== 'camera') throw new Error('Pick the webcam on the laptop: its page runs the webcam');
+    select('camera');
+    return fullState();
+  },
   'GET /api/presets': () => loadPresets(),
   'POST /api/presets': b => savePresets(b.presets),
 };
@@ -236,18 +279,44 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ...settingsView(), on: { assist: !!advisorConfig().provider, inspo: inspoConfig().sources.length > 0 } });
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
+  // The webcam host: only the laptop's own page may run the webcam, push frames or upload photos.
+  if (path.startsWith('/api/webcam/')) {
+    if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
+    try {
+      const what = path.slice('/api/webcam/'.length);
+      if (what === 'host' && req.method === 'GET') {
+        webcam.attach(res, { deviceId: url.searchParams.get('device') || '', label: url.searchParams.get('label') || '' });
+        if (selected !== 'webcam') { selected = 'webcam'; broadcast('state', fullState()); }
+        return;
+      }
+      if (req.method !== 'POST') return json(res, 404, { error: 'Not found' });
+      if (what === 'frame') { webcam.receiveFrame(await raw(req, 4e6)); res.writeHead(204); return res.end(); }
+      if (what === 'photo') return json(res, 200, webcam.savePhoto(url.searchParams.get('id'), await raw(req, 64e6)));
+      if (what === 'movie') { webcam.appendMovie(await raw(req, 32e6)); return json(res, 200, { ok: true }); }
+      const b = await body(req);
+      if (what === 'state') { webcam.update(b); return json(res, 200, { ok: true }); }
+      if (what === 'reply') { webcam.reply(b); return json(res, 200, { ok: true }); }
+      if (what === 'devices') {
+        webcams = (Array.isArray(b.devices) ? b.devices : []).slice(0, 16).map(d => ({ id: String(d.id).slice(0, 200), label: String(d.label || 'Webcam').slice(0, 80) }));
+        broadcast('state', fullState());
+        return json(res, 200, { ok: true });
+      }
+      return json(res, 404, { error: 'Not found' });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
   if (path === '/api/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
-    res.write(`event: state\ndata: ${JSON.stringify(camera.state())}\n\n`);
+    res.write(`event: state\ndata: ${JSON.stringify(fullState())}\n\n`);
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
   }
-  if (path === '/api/liveview.mjpg') return camera.addViewer(res);
+  if (path === '/api/liveview.mjpg') return active().addViewer(res);
   if (path === '/api/liveview.jpg') {
-    const f = await camera.pullFrame(+url.searchParams.get('after') || 0);
+    const src = active();
+    const f = await src.pullFrame(+url.searchParams.get('after') || 0);
     if (!f) { res.writeHead(204, { 'Cache-Control': 'no-store' }); return res.end(); }
-    const out = shrink(f);
+    const out = shrink(f, src);
     res.writeHead(200, {
       'Content-Type': 'image/jpeg', 'Content-Length': out.length, 'Cache-Control': 'no-store', 'X-Seq': f.seq,
       ...(f.af && { 'X-AF': `${f.af.x},${f.af.y},${f.af.w},${f.af.h}` }),
@@ -280,6 +349,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 
 export async function shutdown() {
   tunnel.stop();
+  await webcam.close().catch(() => {});
   await camera.stopMovie().catch(() => {});
   await camera.close();
 }
