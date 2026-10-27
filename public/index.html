@@ -265,7 +265,7 @@
 
     <div class="pane hidden" data-pane="advisor">
       <label class="field">Model<select id="advModel"></select></label>
-      <p class="hint" id="advHint">Shot assist (the ✦ button by the exposure settings, or A) sends the live view frame to this model, which suggests settings for the scene.</p>
+      <p class="hint" id="advHint">Shot assist (the ✦ button by the exposure settings, or A) sends the live view frame to this model, which looks at the scene and suggests settings. Scene presets (the grid button beside it, or S) work without it.</p>
       <span class="pcap">API keys</span>
       <p class="hint tight hidden" id="keysRemote">API keys are added and changed on the laptop, under More › AI.</p>
       <form class="keys hidden" id="keysForm" autocomplete="off">
@@ -283,6 +283,21 @@
     <div class="rwin"><div class="rtrack" id="rtrack"></div><div class="rcenter"></div></div>
     <button class="step" id="rulerUp" aria-label="Next value"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
   </div>
+  <section class="scenes hidden" id="scenes" aria-label="Scene presets">
+    <div class="sc-head">
+      <b>Scene presets</b>
+      <span class="sc-hint" id="scHint">Tap one to set the camera</span>
+      <button class="sc-edit hidden" id="scEdit" aria-pressed="false">Edit</button>
+      <button class="close" id="scClose" aria-label="Close scene presets">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+    </div>
+    <div class="sc-row" id="scList" role="group" aria-label="Presets"></div>
+    <form class="sc-save hidden" id="scSave" autocomplete="off">
+      <input id="scName" maxlength="24" placeholder="Name it, e.g. Studio key light" aria-label="Preset name" required>
+      <button class="as-go">Save</button>
+      <button type="button" class="as-quiet" id="scSaveCancel">Cancel</button>
+    </form>
+  </section>
   <section class="assist hidden" id="assist" aria-label="Shot assist">
     <div class="as-head">
       <b>Shot assist</b>
@@ -295,11 +310,10 @@
     <div class="as-form" id="asForm">
       <div class="as-tags" id="asScenes" role="group" aria-label="Scene"></div>
       <div class="as-tags" id="asMods" role="group" aria-label="Conditions"></div>
-      <button id="asGo" class="as-go">Use preset settings</button>
       <div class="as-ai">
         <div class="as-ask">
           <input id="asNotes" placeholder="Notes for the AI (optional): the look you want" maxlength="300" aria-label="Notes for Ask AI">
-          <button id="asAi" class="as-ai-go">Ask AI</button>
+          <button id="asAi" class="as-go">Ask AI</button>
         </div>
         <p class="as-hint" id="asAiHint"></p>
       </div>
@@ -321,6 +335,8 @@
     <button class="step as-x" id="asDiscard" title="Discard suggestions" aria-label="Discard suggestions">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
   </div>
+  <button class="step" id="scenesBtn" title="Scene presets: one-tap settings (S)" aria-label="Scene presets" aria-expanded="false" aria-controls="scenes">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M17 14v6M14 17h6"/></svg></button>
   <button class="step as-btn" id="assistBtn" title="Shot assist: settings for the scene (A)" aria-label="Shot assist" aria-expanded="false" aria-controls="assist">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 2l.6 1.4L7 4l-1.4.6L5 6l-.6-1.4L3 4l1.4-.6z"/></svg><span class="as-dot hidden" id="asDot"></span></button>
   <button class="step" id="expoMore" title="All exposure settings" aria-label="All exposure settings">

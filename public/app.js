@@ -1,5 +1,5 @@
 import { fmt, LABEL } from './format.js';
-import { SCENES, CONDITIONS, MODE_INFO, presetAdvice, presetSummary } from './scenes.js';
+import { SCENES, CONDITIONS, MODE_INFO, presetAdvice, presetBrief, presetPlan, presetSummary } from './scenes.js';
 import { VoiceTrigger, VOICE_HELP } from './triggers/voice.js';
 import { GestureTrigger, GESTURES } from './triggers/gestures.js';
 import { ClapTrigger } from './triggers/clap.js';
@@ -506,7 +506,7 @@ for (const name of CHIP_ROWS) {
   chip.className = 'chip hidden'; chip.dataset.name = name;
   chip.innerHTML = '<span class="l"></span><span class="vs"><span class="v mono"></span><span class="n mono"></span></span>';
   chip.querySelector('.l').textContent = LABEL[name];
-  chip.onclick = () => { openChip = openChip === name ? null : name; if (openChip) toggleAssist(false); renderProps(); };
+  chip.onclick = () => { openChip = openChip === name ? null : name; if (openChip) { toggleAssist(false); toggleScenes(false); } renderProps(); };
   $('chips').append(chip);
 }
 for (const name of EXPOSURE_ROWS) {
@@ -875,9 +875,9 @@ function renderRecording() {
 }
 
 // ---------- shot assist ----------
-// Lives in the exposure bar: pick a scene (and conditions), then either take the scene preset
-// (generic rules from scenes.js, instant and offline) or ask the AI model, which looks at the
-// live view frame. Both produce the same advice, so the suggested values show on the exposure
+// Lives in the exposure bar: pick a scene (and conditions) and ask the AI model, which looks at
+// the live view frame and starts from that scene's preset. The one-tap presets are their own
+// panel (scene presets, below); both produce the same advice, so the suggested values show on the exposure
 // chips with one Apply. On a phone in portrait it is a bottom sheet that lists the changes
 // itself, since the chips are too narrow to show them. Settings the mode dial locks are queued
 // and set as soon as the camera reports them writable again.
@@ -947,9 +947,7 @@ function renderAiState() {
   const why = aiBlocker();
   $('asAi').disabled = !!why;
   $('asAi').title = why || 'Send the live view frame to the AI model for settings tuned to this exact scene';
-  $('asAiHint').textContent = why || 'Ask AI looks at the live view and tunes the settings to this scene. Notes only go to the AI.';
-  $('asGo').disabled = !assist.scene;
-  $('asGo').title = assist.scene ? 'Generic settings for this kind of shot, explained' : 'Pick a scene first';
+  $('asAiHint').textContent = why || 'Ask AI looks at the live view and tunes the settings to this scene. For quick settings without AI, use the scene presets.';
 }
 
 // The same Apply appears in the bar (desktop) and in the panel (phone).
@@ -1018,7 +1016,7 @@ function renderAssistOut() {
   }).join('');
   const they = locked.length > 1 ? 'they will' : 'it will';
   const tips = advice.tips.length + (advice.scene ? 1 : 0);
-  const source = advice.source === 'preset' ? `${sceneLabel() || 'Scene'} preset` : `AI · ${advice.model || 'model'}`;
+  const source = advice.source === 'ai' ? `AI · ${advice.model || 'model'}` : `${advice.label || sceneLabel() || 'Scene'} preset`;
   // The mode is on the dial, so it's explained rather than set.
   const mode = state.source !== 'webcam' && MODE_INFO[advice.mode] && `<p class="as-mode"><b>${esc(advice.mode)}</b> mode, ${esc(MODE_INFO[advice.mode])}.${modeName() === advice.mode || locked.length ? '' : ` Turn the dial to ${esc(advice.mode)}.`}</p>`;
   const html = `
@@ -1049,7 +1047,7 @@ function toggleAssist(open = !assistOpen) {
   $('assistBtn').setAttribute('aria-expanded', open);
   if (open && openChip) { openChip = null; renderProps(); }
   if (open && advOpen && sheetMode.matches) toggleAdv(false);
-  if (open) { renderAssistTags(); renderAssist(); }
+  if (open) { toggleScenes(false); renderAssistTags(); renderAssist(); }
   renderApply();
 }
 
@@ -1111,10 +1109,10 @@ async function suggestSettings() {
   }
 }
 
-// One tap: set everything the dial allows now, queue the rest.
-async function applyAdvice() {
+// One tap: set everything the dial allows now, queue the rest. `done` names what was applied.
+async function applyAdvice(done = 'Settings applied') {
   const pending = advice?.settings.filter(s => s.status === 'pending') || [];
-  if (!pending.length) return toast(advice ? 'Nothing left to apply' : 'Pick a scene in shot assist first', !advice);
+  if (!pending.length) return toast(advice ? 'Nothing left to apply' : 'Pick a scene preset or ask shot assist first', !advice);
   const failed = [], queued = [];
   for (const s of pending) {
     if (isLocked(s)) { s.status = 'queued'; queued.push(LABEL[s.name]); continue; }
@@ -1123,7 +1121,7 @@ async function applyAdvice() {
   }
   renderProps();
   if (failed.length) toast(failed.join(' · '), true);
-  else toast(queued.length ? `Applied. ${queued.join(', ')} will be set when you turn the dial to ${advice.mode || 'M'}` : 'Settings applied');
+  else toast(queued.length ? `Applied. ${queued.join(', ')} will be set when you turn the dial to ${advice.mode || 'M'}` : done);
   if (!queued.length && !failed.length) toggleAssist(false);
 }
 
@@ -1140,10 +1138,9 @@ async function setPropValue(name, v) {
 
 $('assistBtn').onclick = () => toggleAssist();
 $('asClose').onclick = () => toggleAssist(false);
-$('asGo').onclick = usePreset;
 $('asAi').onclick = suggestSettings;
 $('asCancel').onclick = () => asking?.abort();
-$('asApply').onclick = $('asApplyPanel').onclick = applyAdvice;
+$('asApply').onclick = $('asApplyPanel').onclick = () => applyAdvice();
 $('asDiscard').onclick = $('asDiscardPanel').onclick = discardAdvice;
 $('asRecap').onclick = () => { formOpen = true; renderAssistTags(); renderForm(); $('asNotes').focus({ preventScroll: true }); };
 $('asModel').onclick = () => { toggleAssist(false); toggleAdv(true, 'advisor'); };
@@ -1191,6 +1188,144 @@ const endAsDrag = () => {
 };
 asHead.addEventListener('pointerup', endAsDrag);
 asHead.addEventListener('pointercancel', endAsDrag);
+
+// ---------- scene presets ----------
+// One tap sets the camera for a kind of shot, with no AI: the built-in scenes from scenes.js
+// matched to the camera's own values, and your own presets saved from the current settings.
+// Both go through the same advice and Apply as shot assist, so settings the dial locks are
+// queued the same way. A built-in scene also becomes shot assist's scene, so Ask AI fine-tunes
+// from it. Your presets live in this browser.
+const SAVE_ROWS = EXPOSURE_ROWS.filter(n => n !== 'quality' && n !== 'size');
+const myScenes = (() => { try { return JSON.parse(localStorage.myScenes || '[]'); } catch { return []; } })();
+const saveMyScenes = () => { try { localStorage.myScenes = JSON.stringify(myScenes); } catch {} };
+let scenesOpen = false, scEditing = false, lastScene = '';
+
+const myBrief = c => ['mode' in c.values ? null : c.mode, ...['aperture', 'shutter', 'iso', 'ev'].filter(n => n in c.values).map(n => fmt(n, c.values[n]))]
+  .filter(Boolean).slice(0, 4).join(' · ');
+
+function renderScenes() {
+  const pill = (id, label, brief, title, mine) => {
+    const b = document.createElement('button');
+    b.className = `sc-pill${mine ? ' mine' : ''}`;
+    b.innerHTML = '<span class="nm"></span><span class="br mono"></span>';
+    b.querySelector('.nm').textContent = label;
+    b.querySelector('.br').textContent = brief;
+    b.title = title;
+    b.setAttribute('aria-pressed', lastScene === id);
+    if (scEditing) {
+      b.disabled = !mine;
+      if (mine) b.setAttribute('aria-label', `Delete ${label}`);
+    }
+    b.onclick = () => (scEditing ? deleteScene(id) : applyScene(id));
+    return b;
+  };
+  const add = document.createElement('button');
+  add.className = 'sc-pill add';
+  add.innerHTML = '<span class="nm">+ Save current</span><span class="br">as your own preset</span>';
+  add.disabled = scEditing;
+  add.onclick = openSave;
+  $('scList').replaceChildren(
+    ...SCENES.map(([id, label]) => pill(id, label, presetBrief(id), presetPlan(id).intent, false)),
+    ...myScenes.map(c => pill(c.id, c.label, myBrief(c), `Your preset: ${myBrief(c)}`, true)),
+    add);
+  $('scenes').classList.toggle('editing', scEditing);
+  $('scEdit').classList.toggle('hidden', !myScenes.length);
+  $('scEdit').textContent = scEditing ? 'Done' : 'Edit';
+  $('scEdit').setAttribute('aria-pressed', scEditing);
+  $('scHint').textContent = scEditing ? 'Tap one of yours to delete it' : 'Tap one to set the camera';
+}
+
+function toggleScenes(open = !scenesOpen) {
+  if (open === scenesOpen) return;
+  scenesOpen = open;
+  $('scenes').classList.toggle('hidden', !open);
+  $('scenesBtn').classList.toggle('active', open);
+  $('scenesBtn').setAttribute('aria-expanded', open);
+  if (open) {
+    toggleAssist(false);
+    if (advOpen && sheetMode.matches) toggleAdv(false);
+    if (openChip) { openChip = null; renderProps(); }
+  } else { scEditing = false; closeSave(); }
+  if (open) renderScenes();
+}
+
+// Your preset as advice: each saved value the camera still offers, as-is.
+function myAdvice(c) {
+  const by = propsByName(), settings = [];
+  for (const [name, value] of Object.entries(c.values)) {
+    const p = by[name];
+    if (!p?.values?.includes(value)) continue;
+    settings.push({ code: p.code, name, label: LABEL[name] || name, value, display: fmt(name, value),
+      current: fmt(name, p.value), same: p.value === value, writable: !!p.writable, reason: '' });
+  }
+  return { source: 'mine', model: null, intent: myBrief(c), scene: '', mode: c.mode, tips: [], settings };
+}
+
+async function applyScene(id) {
+  if (!state.connected) return toast('Connect a camera to use scene presets', true);
+  if (asking) return toast('Shot assist is still asking the AI', true);
+  const mine = myScenes.find(c => c.id === id);
+  const label = mine ? mine.label : SCENES.find(([s]) => s === id)[1];
+  const a = mine ? myAdvice(mine) : presetAdvice(state.props, id);
+  if (!mine) { assist.scene = id; saveAssist(); }
+  const skipped = mine ? Object.keys(mine.values).length - a.settings.length : 0;
+  advice = withStatus({ ...a, label });
+  formOpen = false;
+  lastScene = id;
+  toggleScenes(false);
+  renderProps();
+  if (!advice.settings.some(s => s.status === 'pending')) return toast(`The camera already matches ${label}`);
+  await applyAdvice(`${label} set${skipped ? ` · ${skipped} setting${skipped > 1 ? 's' : ''} this camera doesn't offer` : ''}`);
+}
+
+function openSave() {
+  if (!state.connected) return toast('Connect a camera to save its settings', true);
+  $('scSave').classList.remove('hidden');
+  $('scName').value = '';
+  $('scName').focus();
+}
+function closeSave() { $('scSave').classList.add('hidden'); }
+
+// Saves what you can set from here. A webcam left to expose itself (P) keeps its shutter and ISO
+// out, since setting those would switch it to M.
+$('scSave').onsubmit = e => {
+  e.preventDefault();
+  const label = $('scName').value.trim();
+  if (!label) return;
+  const by = propsByName(), values = {};
+  const autoWebcam = by.mode?.writable && fmt('mode', by.mode.value) !== 'M';
+  for (const name of SAVE_ROWS) {
+    if (!editable(by[name]) || (autoWebcam && (name === 'shutter' || name === 'iso'))) continue;
+    values[name] = by[name].value;
+  }
+  if (!Object.keys(values).length) return toast('Nothing on this camera can be set from here', true);
+  const mode = by.mode && !by.mode.writable ? fmt('mode', by.mode.value) : null;
+  // Saving under a name you already use updates that preset.
+  const old = myScenes.findIndex(c => c.label.toLowerCase() === label.toLowerCase());
+  const preset = { id: old >= 0 ? myScenes[old].id : `my${Date.now()}`, label, mode, values };
+  if (old >= 0) myScenes[old] = preset; else myScenes.push(preset);
+  saveMyScenes();
+  lastScene = preset.id;
+  closeSave();
+  renderScenes();
+  toast(old >= 0 ? `Updated “${label}”` : `Saved “${label}”`);
+};
+
+function deleteScene(id) {
+  const i = myScenes.findIndex(c => c.id === id);
+  if (i < 0) return;
+  const [gone] = myScenes.splice(i, 1);
+  saveMyScenes();
+  if (!myScenes.length) scEditing = false;
+  renderScenes();
+  toast(`Deleted “${gone.label}”`);
+}
+
+$('scenesBtn').onclick = () => toggleScenes();
+$('scClose').onclick = () => toggleScenes(false);
+$('scEdit').onclick = () => { scEditing = !scEditing; closeSave(); renderScenes(); };
+$('scSaveCancel').onclick = closeSave;
+$('scName').onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); closeSave(); } };
 
 // ---------- phone remote ----------
 let qrLib;
@@ -1405,12 +1540,14 @@ document.addEventListener('keydown', e => {
   else if (k === 'h') $('flipBtn').click();
   else if (k === 'r') actions.record();
   else if (k === 'a') toggleAssist();
+  else if (k === 's') toggleScenes();
   else if (k === 'i') { e.preventDefault(); inspo.toggle(); }
   else if ((k === '[' || k === ']') && inspo.isOpen) inspo.step(k === ']' ? 1 : -1);
   else if (k === 'm') toggleAdv();
   else if (k === 'escape') {
     if (openChip) { openChip = null; renderProps(); }
     toggleAssist(false);
+    toggleScenes(false);
     toggleFilm(false);
     cancel();
   }

@@ -325,13 +325,35 @@ input[type=range] { accent-color: var(--accent); }
 .as-go { height: 44px; padding: 0 18px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; flex: none; }
 .as-go:disabled { opacity: .4; cursor: default; }
 .assist.busy .as-go, .assist.busy .as-ai-go { opacity: .7; pointer-events: none; }
-/* the preset is the main action; Ask AI and its notes sit below as the optional second opinion */
-.as-form > .as-go { height: 46px; }
-.as-ai { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.as-ai { display: flex; flex-direction: column; gap: 6px; }
 .as-ai-go { height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(245, 196, 0, .5); color: var(--accent); font-weight: 700; flex: none; }
 .as-ai-go:hover:not(:disabled) { background: rgba(245, 196, 0, .08); }
 .as-ai-go:disabled { opacity: .4; cursor: default; }
 .as-hint { margin: 0; color: var(--muted); font-size: 12px; }
+
+/* ---------- scene presets: one-tap grid above the exposure bar ---------- */
+.scenes { position: absolute; left: 50%; bottom: calc(100% + 12px); width: min(720px, 92%); transform: translateX(-50%); max-height: min(60vh, 460px); overflow-y: auto; border-radius: 16px; background: rgba(18, 18, 22, .94); backdrop-filter: blur(16px); border: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 10px; animation: rise .4s var(--spring); box-shadow: 0 20px 50px rgba(0, 0, 0, .5); z-index: 4; }
+.sc-head { display: flex; align-items: center; gap: 10px; }
+.sc-head b { font-size: 14px; }
+.sc-hint { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-edit { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.sc-edit[aria-pressed="true"] { color: var(--accent); border-color: rgba(245, 196, 0, .5); }
+.sc-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.sc-pill { position: relative; min-height: 56px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; text-align: left; transition: border-color .2s, background .2s, transform .15s, opacity .2s; }
+.sc-pill:hover:not(:disabled) { border-color: #4a4a54; }
+.sc-pill:active:not(:disabled) { transform: scale(.97); }
+.sc-pill .nm { font-size: 13.5px; font-weight: 600; }
+.sc-pill .br { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sc-pill.mine::after { content: ""; position: absolute; top: 9px; right: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.sc-pill[aria-pressed="true"] { border-color: rgba(245, 196, 0, .6); background: rgba(245, 196, 0, .08); }
+.sc-pill[aria-pressed="true"] .nm { color: var(--accent); }
+.sc-pill.add { border-style: dashed; background: none; }
+.sc-pill.add .nm { color: var(--accent); }
+.sc-pill:disabled { opacity: .35; cursor: default; }
+.scenes.editing .sc-pill.mine { border-color: rgba(255, 77, 69, .5); }
+.scenes.editing .sc-pill.mine::after { content: "×"; width: auto; height: auto; top: 4px; right: 9px; background: none; color: var(--bad); font-size: 18px; font-weight: 600; }
+.sc-save { display: flex; gap: 8px; animation: unfold .35s var(--glide); }
+.sc-save input { flex: 1; min-width: 0; height: 44px; }
 
 /* loading: named steps, a cancel, and a placeholder where the results will land */
 .as-busy { display: flex; flex-direction: column; gap: 10px; animation: unfold .3s var(--glide); }
@@ -495,6 +517,8 @@ dialog[open] { animation: dlg .35s var(--spring); }
   .chip .l { font-size: 9.5px; }
   .chip .v { font-size: 15px; }
   .ruler { width: calc(100% - 16px); bottom: calc(100% + 8px); padding: 6px; gap: 6px; }
+  .scenes { width: calc(100% - 16px); bottom: calc(100% + 8px); max-height: 56dvh; padding: 10px; }
+  .sc-row { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
   /* Shot assist on phones: the chips are too narrow to show changes, so the panel lists them
      and carries Apply; the bar Apply would only cover the chips. */
   .assist { left: 8px; right: 8px; width: auto; bottom: calc(100% + 8px); max-height: 62dvh; padding: 10px; gap: 8px; }

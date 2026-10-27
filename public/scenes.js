@@ -188,6 +188,13 @@ export function presetPlan(sceneId, mods = []) {
   return { mode, intent, scene: s.scene, tips: [...s.tips.slice(0, Math.max(2, 4 - tips.length)), ...tips].slice(0, 4), targets: t };
 }
 
+// One line for a preset button: "A · f/2 · Auto ISO".
+export function presetBrief(sceneId) {
+  const { mode, targets: t } = presetPlan(sceneId);
+  const s = t.shutter && (t.shutter.floor || t.shutter.about);
+  return [mode, t.aperture && `f/${t.aperture.f}`, s && shutterLabel(s), t.iso.auto ? 'Auto ISO' : `ISO ${t.iso.n}`].filter(Boolean).join(' · ');
+}
+
 // ---------- matching targets to the camera's values ----------
 const seconds = v => { if (v >= 0xfffffffd) return null; const n = v >>> 16, d = v & 0xffff; return d ? n / d : null; };
 const stopsApart = (a, b) => Math.abs(Math.log2(a / b));
