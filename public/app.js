@@ -29,7 +29,7 @@ async function api(path, body, { signal } = {}) {
 // stream back entirely, so if the server's opening message never shows up, poll instead.
 const events = new EventSource('/api/events');
 let pollTimer = setTimeout(startPolling, 5000);
-events.addEventListener('state', e => { clearTimeout(pollTimer); pollTimer = null; state = JSON.parse(e.data); render(); });
+events.addEventListener('state', e => { clearTimeout(pollTimer); pollTimer = null; state = JSON.parse(e.data); render(); followCamera(); });
 events.addEventListener('prop', e => { const p = JSON.parse(e.data); state.props[p.code] = p; renderProps(); });
 events.addEventListener('photo', e => addPhoto(JSON.parse(e.data), true));
 events.addEventListener('log', e => console.log('[camera]', JSON.parse(e.data)));
@@ -1250,12 +1250,14 @@ async function refreshWebcams() {
   renderSources();
 }
 
-async function startWebcam(id) {
+// `auto`: an automatic fallback, which stays quiet when the browser says no (a tab without camera
+// permission would otherwise complain on every load).
+async function startWebcam(id, auto = false) {
   try {
     await host.start(id);
     remember(`webcam:${host.deviceId}`);
     refreshWebcams(); // names appear once the camera permission is granted
-  } catch (e) { toast(e.message, true); renderSources(true); }
+  } catch (e) { if (!auto || e.name !== 'NotAllowedError') toast(e.message, true); renderSources(true); }
 }
 
 $('sourceSel').onchange = async () => {
@@ -1266,12 +1268,26 @@ $('sourceSel').onchange = async () => {
   host.stop();
 };
 
+// The USB camera wins whenever it's connected (the server switches to it). Without one, the laptop
+// falls back to a webcam: the one picked last, else the first. Picking "USB camera" by hand with
+// nothing plugged in is left alone; only a camera going away, or starting without one, falls back.
+const fallbackId = () => {
+  const want = remembered();
+  return want.startsWith('webcam:') && laptopWebcams.some(c => c.id === want.slice(7)) ? want.slice(7) : laptopWebcams[0]?.id;
+};
+let usbWas = null;
+function followCamera() {
+  const usb = !!state.usbCamera?.connected, lost = usbWas && !usb;
+  usbWas = usb;
+  if (lost && isLaptop && laptopWebcams.length && state.source === 'camera') startWebcam(fallbackId(), true);
+}
+
 async function initWebcamHost() {
   await refreshWebcams();
   navigator.mediaDevices?.addEventListener('devicechange', refreshWebcams);
-  const want = remembered(), s = await api('/api/state').catch(() => ({}));
+  const s = await api('/api/state').catch(() => ({}));
   // Another window may be running the webcam already; only picking it here takes over.
-  if (want.startsWith('webcam:') && laptopWebcams.some(c => c.id === want.slice(7)) && !(s.source === 'webcam' && s.connected)) startWebcam(want.slice(7));
+  if (laptopWebcams.length && !s.usbCamera?.connected && !(s.source === 'webcam' && s.connected)) startWebcam(fallbackId(), true);
 }
 
 // ---------- API keys (More › AI) ----------

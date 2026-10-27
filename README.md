@@ -73,7 +73,7 @@ Pick a webcam from the source list next to the camera name at the top of the app
 - **Video** records with sound when the laptop's microphone is allowed, as MP4 (or WebM where the browser can't make MP4), and is saved a second at a time while recording.
 - **Shot assist** scene presets and Ask AI work with the settings the webcam has; there's no aperture, and no mode dial to turn.
 - **Phones** see the webcam list and control the webcam like any camera, and can switch back to the USB camera, but a webcam can only be picked on the laptop: the laptop's page runs it.
-- The laptop remembers the pick: the desktop app (or a localhost tab) reopens the webcam next time. If that window closes, the webcam goes offline until it's picked again; phones see that and can switch back to the USB camera.
+- **A plugged-in camera wins.** When a USB camera connects, the app switches to it (unless the webcam is recording or taking a shot). When it is unplugged, or the app starts without one, the laptop falls back to the webcam picked last, else the first one. Picking **USB camera** by hand with nothing plugged in stays put. If the window running the webcam closes, the webcam goes offline until the app is opened again; phones see that and can switch back to the USB camera.
 - While a webcam is in use the USB camera stays connected in the background, so photos taken with its own shutter button still download, but its live view stops.
 
 Keep the desktop window (or the localhost tab) open while using a webcam from the phone; minimising it is fine in the desktop app. A background browser tab may slow the frames down, so prefer the desktop app for this.

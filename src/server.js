@@ -86,6 +86,16 @@ function broadcast(type, data) {
   const msg = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) res.write(msg);
 }
+// A camera that gets plugged in wins over the webcam. The webcam stays the laptop page's remembered
+// fallback, which it reopens when the camera goes away. Not mid-recording or mid-shot, though.
+let usbWas = false;
+camera.on('state', () => {
+  if (camera.connected && !usbWas && selected === 'webcam' && !webcam.recordingSince && !webcam.capturing) {
+    selected = 'camera';
+    webcam.release(`${camera.info?.model || 'Camera'} connected: switched to it`);
+  }
+  usbWas = camera.connected;
+});
 for (const src of [camera, webcam]) {
   src.on('state', () => broadcast('state', fullState()));
   src.on('photo', d => broadcast('photo', d)); // one gallery for both

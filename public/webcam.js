@@ -78,8 +78,8 @@ export class WebcamHost {
     let stream;
     try { stream = await this.open(deviceId); }
     catch (e) {
-      throw new Error(e.name === 'NotAllowedError' ? 'Camera permission was blocked for this page'
-        : e.name === 'NotReadableError' ? 'The webcam is in use by another app' : `Couldn't open the webcam: ${e.message}`);
+      throw Object.assign(new Error(e.name === 'NotAllowedError' ? 'Camera permission was blocked for this page'
+        : e.name === 'NotReadableError' ? 'The webcam is in use by another app' : `Couldn't open the webcam: ${e.message}`), { name: e.name });
     }
     this.stream = stream;
     this.track = stream.getVideoTracks()[0];
