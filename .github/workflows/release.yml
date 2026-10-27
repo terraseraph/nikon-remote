@@ -1,0 +1,60 @@
+# Builds the Windows desktop app and publishes it as a GitHub Release named after the version in
+# package.json. Pushes to main refresh that release's files; bump the version for a new release.
+# The file names have no version in them, so .../releases/latest/download/<name> always works.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE', '.env.example']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Build installer and portable exe
+        run: npx electron-builder --win --publish never
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Nikon Remote ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          overwrite_files: true
+          body: |
+            Windows desktop app, built from ${{ github.sha }}.
+
+            - **Nikon-Remote-Setup.exe**: installer (Start menu shortcut, uninstaller)
+            - **Nikon-Remote-Portable.exe**: runs without installing
+
+            The builds aren't code-signed, so Windows SmartScreen may warn the first time. Choose **More info › Run anyway**.
+            Plug in your camera before starting it. See the README for setup and supported cameras.
+          files: |
+            dist/Nikon-Remote-Setup.exe
+            dist/Nikon-Remote-Portable.exe

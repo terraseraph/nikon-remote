@@ -1,5 +1,10 @@
 # Nikon Remote
 
+[![Release](https://github.com/terraseraph/nikon-remote/actions/workflows/release.yml/badge.svg)](https://github.com/terraseraph/nikon-remote/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/terraseraph/nikon-remote)](https://github.com/terraseraph/nikon-remote/releases/latest)
+
+**Download for Windows:** [Installer](https://github.com/terraseraph/nikon-remote/releases/latest/download/Nikon-Remote-Setup.exe) · [Portable .exe](https://github.com/terraseraph/nikon-remote/releases/latest/download/Nikon-Remote-Portable.exe) · [All releases](https://github.com/terraseraph/nikon-remote/releases)
+
 A USB remote for your camera that runs on your own Windows PC: live view, full exposure control, an AI shot assistant, reference-photo posing guides, and hands-free triggers by voice, gesture or clap. Use it in its own **desktop window**, in **Chrome or Edge**, or from your **phone** over Wi-Fi or the internet.
 
 Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS**, **Sony Alpha** and other PTP cameras (see [Supported cameras](#supported-cameras)). No camera drivers, SDKs or vendor software needed: it talks to the camera over the PTP driver that Windows already has.
@@ -59,7 +64,20 @@ Brand drivers live in `src/drivers/`. Each one translates its camera's settings 
 
 ## Getting started
 
-**Requirements:** Windows 10 or 11, [Node.js 20+](https://nodejs.org/), and a Nikon camera on USB.
+### Download the desktop app
+
+The quickest way: download the latest build for Windows 10 or 11, no Node.js needed.
+
+- [**Nikon-Remote-Setup.exe**](https://github.com/terraseraph/nikon-remote/releases/latest/download/Nikon-Remote-Setup.exe): installer with a Start menu shortcut and uninstaller
+- [**Nikon-Remote-Portable.exe**](https://github.com/terraseraph/nikon-remote/releases/latest/download/Nikon-Remote-Portable.exe): a single file that runs without installing
+
+The builds aren't code-signed yet, so Windows SmartScreen may warn the first time: choose **More info › Run anyway**. Every push to `main` rebuilds them with [GitHub Actions](.github/workflows/release.yml), and bumping `version` in `package.json` starts a new release.
+
+Put your `.env` (for the AI features) in `%APPDATA%\Nikon Remote`.
+
+### Run from source
+
+**Requirements:** Windows 10 or 11, [Node.js 20+](https://nodejs.org/), and a camera on USB.
 
 ```bash
 git clone https://github.com/terraseraph/nikon-remote.git
@@ -77,7 +95,7 @@ Plug the camera in over USB, switch it on, then pick one of the two ways to run 
 
 > Close Nikon NX Tether, SnapBridge, Canon EOS Utility, Sony Imaging Edge, Lightroom tethering, or anything else that grabs the camera first. Only one app can talk to it at a time.
 
-### Desktop app (Electron)
+#### As a desktop app
 
 ```bash
 npm run app
@@ -95,7 +113,7 @@ In the desktop app, keys, presets and thumbnails are stored in `%APPDATA%\Nikon 
 
 Voice commands need Chrome's or Edge's speech service, which Electron doesn't include. Use **View › Open in browser** (Ctrl+B) to open the same session in your browser when you want voice. Everything else, including clap and gestures, works in the desktop window.
 
-### In the browser
+#### In the browser
 
 ```bash
 npm start
