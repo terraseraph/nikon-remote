@@ -9,6 +9,19 @@ A USB remote for your camera that runs on your own Windows PC: live view, full e
 
 Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS**, **Sony Alpha** and other PTP cameras (see [Supported cameras](#supported-cameras)). No camera drivers, SDKs or vendor software needed: it talks to the camera over the PTP driver that Windows already has. A **webcam** or other USB video camera works too (see [Webcams](#webcams)).
 
+![Nikon Remote running with a Z50II: grid, zoom, focus, scene presets, shot assist, exposure and trigger settings, then a shot landing in the gallery](docs/media/walkthrough.gif)
+
+<sub>[Full-quality video](docs/media/walkthrough.mp4)</sub>
+
+| | |
+| --- | --- |
+| ![Live view with the focus box](docs/media/01-live-view.png) | ![Rule-of-thirds grid](docs/media/02-grid.png) |
+| Live view with the camera's focus box | Rule-of-thirds grid |
+| ![Scene presets](docs/media/03-scene-presets.png) | ![Shot assist](docs/media/04-shot-assist.png) |
+| One-tap scene presets | Shot assist |
+| ![Exposure settings](docs/media/06-more-exposure.png) | ![Trigger settings](docs/media/07-more-triggers.png) |
+| Exposure settings | Voice, gesture and clap triggers |
+
 ## Features
 
 ### Camera control
