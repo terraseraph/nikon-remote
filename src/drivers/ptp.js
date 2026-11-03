@@ -30,7 +30,7 @@ export function shutterFromSeconds(s) {
 export class PtpDriver {
   brand = 'Camera';
   experimental = true;
-  features = { liveView: false, focusPoint: false, movie: false, autofocus: false };
+  features = { liveView: false, focusPoint: false, movie: false, autofocus: false, card: true };
   // Skip properties DeviceInfo doesn't list. Nikon leaves its vendor properties out of that list.
   onlyListedProps = true;
 

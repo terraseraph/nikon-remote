@@ -2,14 +2,15 @@
 // Requests from this machine are always allowed. Other devices on the network (a phone)
 // need the access key, which they get by scanning the QR code shown in the app.
 import { createServer } from 'node:http';
-import { createReadStream, existsSync, statSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, normalize, extname } from 'node:path';
+import { createReadStream, existsSync, statSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join, normalize, extname, dirname, basename, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { networkInterfaces, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { Camera } from './camera.js';
 import { Webcam } from './webcam.js';
+import { checkFolder } from './photos.js';
 import { Tunnel } from './tunnel.js';
 import jpeg from 'jpeg-js';
 import { advise, advisorConfig, SCENES } from './advisor.js';
@@ -26,7 +27,13 @@ const DATA = process.env.DATA_DIR || ROOT;
 // or be entered in the app; those are laid on top, so they win over the .env.
 if (existsSync(join(DATA, '.env'))) process.loadEnvFile(join(DATA, '.env'));
 loadSettings(DATA);
-const CAPTURES = normalize(process.env.CAPTURES_DIR || join(picturesDir(), 'Nikon Remote'));
+const DEFAULT_CAPTURES = normalize(process.env.CAPTURES_DIR || join(picturesDir(), 'Nikon Remote'));
+// A folder picked in the app (the gear in Shots) wins; if it's gone, e.g. an unplugged drive,
+// shots go to the default and the app says so.
+const FOLDER_FILE = join(DATA, 'folder.json');
+let CAPTURES = DEFAULT_CAPTURES, folderError = null;
+try { if (existsSync(FOLDER_FILE)) CAPTURES = checkFolder(JSON.parse(readFileSync(FOLDER_FILE, 'utf8')).captures); }
+catch (e) { folderError = `${e.message}. Saving to the default folder until it's back.`; console.log(folderError); }
 // Thumbnails stay with the app so they don't show up as photos in the Pictures album.
 const THUMBS = join(DATA, '.cache', 'thumbs');
 const PORT = +process.env.PORT || 8765;
@@ -59,6 +66,19 @@ function picturesDir() {
     } catch {}
   }
   return join(homedir(), 'Pictures');
+}
+
+const folderView = () => ({ path: CAPTURES, default: DEFAULT_CAPTURES, error: folderError });
+// '' or the default path goes back to the default. Checked before anything changes.
+function setFolder(path) {
+  const custom = String(path ?? '').trim() && normalize(String(path).trim()) !== DEFAULT_CAPTURES;
+  const dir = checkFolder(custom ? path : DEFAULT_CAPTURES);
+  if (custom) writeFileSync(FOLDER_FILE, JSON.stringify({ captures: dir }, null, 2));
+  else rmSync(FOLDER_FILE, { force: true });
+  CAPTURES = camera.capturesDir = webcam.capturesDir = dir;
+  folderError = null;
+  broadcast('folder', folderView()); // every open page reloads its shots from the new folder
+  return folderView();
 }
 
 const camera = new Camera({ capturesDir: CAPTURES, thumbsDir: THUMBS });
@@ -166,8 +186,10 @@ async function body(req) {
 }
 
 function serveFile(req, res, base, rel) {
-  const file = normalize(join(base, decodeURIComponent(rel)));
-  if (!file.startsWith(base) || !existsSync(file) || statSync(file).isDirectory()) return json(res, 404, { error: 'Not found' });
+  let file;
+  try { file = normalize(join(base, decodeURIComponent(rel))); } catch { return json(res, 400, { error: 'Bad path' }); }
+  const inside = file.startsWith(base.endsWith(sep) ? base : base + sep); // not a sibling like "Nikon Remote2"
+  if (!inside || !existsSync(file) || statSync(file).isDirectory()) return json(res, 404, { error: 'Not found' });
   const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream';
   const size = statSync(file).size;
   // Range support so videos can be scrubbed in the browser.
@@ -247,6 +269,10 @@ const routes = {
     select('camera');
     return fullState();
   },
+  // The USB camera's own card, whichever source is picked: copy older shots off it.
+  'POST /api/card/download': b => camera.downloadFromCard(b.handles),
+  'GET /api/card/job': () => camera.cardJob || {},
+  'GET /api/folder': () => folderView(),
   'GET /api/presets': () => loadPresets(),
   'POST /api/presets': b => savePresets(b.presets),
 };
@@ -278,6 +304,12 @@ const server = createServer(async (req, res) => {
     return json(res, 200, tunnelState());
   }
   // API keys: laptop only, like the access key above. Phones and the tunnel never see or change them.
+  // The photos folder is a path on the laptop's disks, so only the laptop picks it.
+  if (path === '/api/folder' && req.method === 'POST') {
+    if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
+    try { return json(res, 200, setFolder((await body(req)).path)); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
   if (path === '/api/settings' || path === '/api/settings/test') {
     if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
     try {
@@ -351,8 +383,35 @@ const server = createServer(async (req, res) => {
       return res.end(img.data);
     } catch (e) { return json(res, 404, { error: e.message }); }
   }
+  if (path === '/api/card') {
+    try { return json(res, 200, await camera.cardFiles({ start: url.searchParams.get('start') })); }
+    catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  if (path === '/api/card/thumb') {
+    try {
+      const jpg = await camera.cardThumb(+url.searchParams.get('h'));
+      // no-store: handles are renumbered when the camera reconnects
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': jpg.length, 'Cache-Control': 'no-store' });
+      return res.end(jpg);
+    } catch (e) { return json(res, 404, { error: e.message }); }
+  }
+  if (path === '/api/card/view') {
+    try {
+      const v = await camera.cardView(+url.searchParams.get('h'));
+      if (v.file) return serveFile(req, res, dirname(v.file), encodeURIComponent(basename(v.file))); // with ranges, for video
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': v.jpeg.length, 'Cache-Control': 'no-store' });
+      return res.end(v.jpeg);
+    } catch (e) { return json(res, 404, { error: e.message }); }
+  }
   if (path.startsWith('/captures/.thumbs/')) return serveFile(req, res, THUMBS, path.slice('/captures/.thumbs/'.length));
-  if (path.startsWith('/captures/')) return serveFile(req, res, CAPTURES, path.slice('/captures/'.length));
+  // Only day folders' files: the photos folder may be one that holds much more than shots.
+  if (path.startsWith('/captures/')) {
+    const rel = path.slice('/captures/'.length);
+    let name = '';
+    try { name = decodeURIComponent(rel); } catch {}
+    if (!/^\d{4}-\d{2}-\d{2}\/[^/\\]+$/.test(name)) return json(res, 404, { error: 'Not found' });
+    return serveFile(req, res, CAPTURES, rel);
+  }
 
   const handler = routes[`${req.method} ${path}`];
   if (handler) {

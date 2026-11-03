@@ -32,6 +32,7 @@ Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS
 - **Exposure controls:** aperture, shutter, ISO, exposure compensation, white balance, metering, focus mode, image quality and size. What's writable follows the mode dial: everything in **M**, partial in P/A/S.
 - **Video recording:** start and stop by button, key, voice ("action" / "cut") or gesture
 - **Auto-download:** every shot, including ones taken with the camera's own shutter button, is copied to `Pictures/Nikon Remote/YYYY-MM-DD/` and shown in the gallery strip
+- **Camera card:** browse the shots already on the card (**Shots › Camera card**). Tap one to view it full size (RAW files show their built-in full-size JPEG, videos play), or long-press or use **Select** to pick several and copy them into the folder for the day they were taken. Files already copied are marked and skipped. Nikon and standard PTP cameras; not yet Canon or Sony
 - **Webcams:** pick the laptop's webcam (or any USB video camera) as the camera instead: live view, photos, video and every control it exposes, from the laptop and the phone
 
 ### Shooting
@@ -315,7 +316,7 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
 
 ### Configuration
 
-API keys are best added in the app (**More › AI**). Everything else is an environment variable, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
+API keys are best added in the app (**More › AI**). Everything else is an environment variable, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection; the gear in **Shots** on the laptop picks another folder, after checking the app can write and read there), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
 
 ## License
 

@@ -41,7 +41,7 @@ const BY_CANON = Object.fromEntries(Object.entries(MAP).map(([c, m]) => [m.code,
 
 export class CanonDriver extends PtpDriver {
   brand = 'Canon';
-  features = { liveView: true, focusPoint: false, movie: true, autofocus: true };
+  features = { liveView: true, focusPoint: false, movie: true, autofocus: true, card: false }; // EOS lists the card with its own operations, not supported yet
   propMap = MAP;
 
   async init() {

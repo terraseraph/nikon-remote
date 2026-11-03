@@ -149,6 +149,11 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .strip button.new { animation: arrive .5s var(--spring); border-color: var(--accent); }
 @keyframes arrive { from { transform: translateY(20px) scale(.6); opacity: 0; } }
 .strip img { height: 64px; display: block; }
+.film-head #galleryHint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.film-tools { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+.film-card { margin-left: auto; padding: 4px 10px; font-size: 12px; }
+.film-icon { padding: 4px; display: grid; place-items: center; }
+.film-icon svg { width: 16px; height: 16px; }
 .strip .play { position: absolute; inset: 0; display: grid; place-items: center; font-size: 22px; color: #fff; text-shadow: 0 1px 6px #000; }
 
 /* ---------- right side: compact controls + advanced drawer ---------- */
@@ -454,14 +459,37 @@ dialog { background: #000; border: 1px solid var(--line); border-radius: var(--r
 dialog::backdrop { background: #000d; }
 dialog[open] { animation: dlg .35s var(--spring); }
 @keyframes dlg { from { transform: scale(.96); opacity: 0; } }
-#viewerImg { max-width: 95vw; max-height: calc(95vh - 52px); display: block; }
-#viewerVideo { max-width: 95vw; max-height: calc(95vh - 52px); display: block; }
+/* minus the dialog's border, which would otherwise add a scrollbar */
+#viewerImg { max-width: calc(95vw - 2px); max-height: calc(95vh - 52px); display: block; }
+#viewerVideo { max-width: calc(95vw - 2px); max-height: calc(95vh - 52px); display: block; }
 .viewer-bar { display: flex; gap: 12px; align-items: center; padding: 8px 12px; }
 .viewer-bar span { flex: 1; color: var(--muted); }
 .viewer-bar a { color: var(--accent); }
 .ghost { background: transparent; border: 1px solid var(--line); }
 .ghost:hover { border-color: var(--accent); color: var(--accent); }
 .phone-dialog { padding: 20px; max-width: 420px; }
+.folder-dialog { width: min(520px, 95vw); max-width: none; }
+.folder-dialog .viewer-bar { padding: 8px 0 0; }
+#folderStatus.bad { color: var(--bad); }
+#folderStatus.good { color: var(--ok); }
+.card-dialog { width: min(760px, 95vw); }
+.card-head { display: flex; align-items: baseline; gap: 12px; padding: 14px 14px 0; flex-wrap: wrap; }
+.card-head h2 { font-size: 14px; margin: 0; }
+.card-head .hint { margin: 0; }
+.card-head .hint.bad { color: var(--bad); }
+.card-all { padding: 4px 10px; font-size: 12px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; padding: 12px 14px; max-height: calc(95vh - 120px); overflow-y: auto; }
+.card-grid:empty { display: none; }
+.card-file { position: relative; padding: 0; aspect-ratio: 3 / 2; background: #111; border: 2px solid transparent; border-radius: 7px; overflow: hidden; -webkit-touch-callout: none; user-select: none; }
+.card-file img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-file .card-name { display: grid; place-items: center; height: 100%; font-size: 11px; color: var(--muted); padding: 4px; word-break: break-all; }
+.card-file .play { position: absolute; inset: 0; display: grid; place-items: center; font-size: 22px; color: #fff; text-shadow: 0 1px 6px #000; }
+.card-file.done::after { content: '✓'; position: absolute; right: 4px; bottom: 2px; color: var(--ok); font-weight: 700; text-shadow: 0 1px 4px #000; }
+.card-file.done img { opacity: .55; }
+.card-file[aria-pressed="true"] { border-color: var(--accent); }
+.card-grid.selecting .card-file::before { content: ''; position: absolute; left: 5px; top: 5px; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #000; z-index: 1; }
+.card-grid.selecting .card-file[aria-pressed="true"]::before { background: var(--accent); border-color: var(--accent); }
+.card-go { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .phone-dialog h2 { font-size: 14px; color: var(--fg); }
 .qr-list { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 12px 0; }
 .qr-list:empty { display: none; }

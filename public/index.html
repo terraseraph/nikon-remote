@@ -141,7 +141,8 @@
   </section>
   <div class="toast hidden" id="toast"></div>
   <div class="film" id="film">
-    <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span></div>
+    <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span><span class="film-tools"><button id="cardBtn" class="ghost film-card hidden">Camera card</button><button id="folderBtn" class="ghost film-icon hidden" title="Where shots are saved" aria-label="Where shots are saved">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></span></div>
     <div class="strip" id="strip"></div>
   </div>
 </main>
@@ -360,6 +361,23 @@
   </div>
   <p class="hint">Each code includes a private access key — anyone who scans it can control the camera, so don't share it.</p>
   <div class="viewer-bar"><span></span><button id="phoneClose" class="ghost">Close</button></div>
+</dialog>
+
+<dialog id="folderDialog" class="phone-dialog folder-dialog" aria-labelledby="folderTitle">
+  <h2 id="folderTitle">Where shots are saved</h2>
+  <form class="in-ask" id="folderForm">
+    <input id="folderInput" aria-label="Folder path" placeholder="e.g. D:\Photos\Nikon" spellcheck="false" autocomplete="off">
+    <button class="as-go" id="folderSave">Save</button>
+  </form>
+  <p class="hint" id="folderStatus" role="status"></p>
+  <p class="hint">Each day&rsquo;s shots go in a dated folder inside it. The app checks it can write and read there before switching; shots already taken stay where they are.</p>
+  <div class="viewer-bar"><button id="folderDefault" type="button" class="ghost">Use default</button><span></span><button id="folderClose" type="button" class="ghost">Close</button></div>
+</dialog>
+
+<dialog id="cardDialog" class="card-dialog" aria-labelledby="cardTitle">
+  <div class="card-head"><h2 id="cardTitle">On the camera&rsquo;s card</h2><span class="hint" id="cardStatus" role="status"></span><button id="cardSelect" class="ghost film-card" aria-pressed="false">Select</button><button id="cardAll" class="ghost card-all">Select all</button></div>
+  <div class="card-grid" id="cardGrid"></div>
+  <div class="viewer-bar"><span></span><button id="cardNew" class="ghost">Select not copied</button><button id="cardDownload" class="card-go" disabled>Copy to laptop</button><button id="cardClose" class="ghost">Close</button></div>
 </dialog>
 
 <dialog id="viewer">

@@ -468,6 +468,7 @@ function render() {
     : state.source !== 'webcam' ? 'Plug in the camera and switch it on'
     : isLaptop ? 'Pick the webcam in the source list above to start it' : 'The webcam runs from the laptop: open Nikon Remote there and pick it';
   $('viewport').title = state.features?.focusPoint === false ? '' : 'Tap to focus here';
+  $('cardBtn').classList.toggle('hidden', !(state.source !== 'webcam' && state.connected && state.features?.card));
   renderSources();
   showLv ? liveView.start() : liveView.stop();
   renderRecording();
@@ -651,18 +652,26 @@ function addPhoto(p, fresh = false) {
   img.onerror = () => { img.onerror = null; img.src = p.preview; };
   b.append(img);
   if (p.video) b.insertAdjacentHTML('beforeend', '<span class="play">▶</span>');
-  b.onclick = () => {
-    $('viewerImg').classList.toggle('hidden', !!p.video);
-    $('viewerVideo').classList.toggle('hidden', !p.video);
-    if (p.video) $('viewerVideo').src = p.url; else $('viewerImg').src = p.preview;
-    $('viewerName').textContent = `${p.day} · ${p.name} · ${(p.size / 1e6).toFixed(1)} MB`;
-    $('viewerDownload').href = p.url; $('viewerDownload').download = p.name;
-    $('viewer').showModal();
-  };
+  b.onclick = () => openViewer({
+    video: !!p.video, src: p.video ? p.url : p.preview, href: p.url, name: p.name,
+    caption: `${p.day} · ${p.name} · ${(p.size / 1e6).toFixed(1)} MB`,
+  });
   b.dataset.thumb = p.thumb;
   if (fresh) { b.classList.add('new'); setTimeout(() => b.classList.remove('new'), 2000); }
   $('strip').prepend(b);
   renderStack(fresh);
+}
+
+// `href` is what Download saves; without one the button is hidden.
+function openViewer({ video, src, caption, href, name }) {
+  $('viewerImg').classList.toggle('hidden', video);
+  $('viewerVideo').classList.toggle('hidden', !video);
+  $('viewerVideo').onerror = $('viewerVideo').onloadeddata = null;
+  if (video) $('viewerVideo').src = src; else $('viewerImg').src = src;
+  $('viewerName').textContent = caption;
+  $('viewerDownload').classList.toggle('hidden', !href);
+  if (href) { $('viewerDownload').href = href; $('viewerDownload').download = name; }
+  $('viewer').showModal();
 }
 
 // The pile of the three latest shots under the controls; tapping it opens the shots drawer.
@@ -681,9 +690,180 @@ function toggleFilm(open = !$('film').classList.contains('open')) {
 }
 $('stackBtn').onclick = () => toggleFilm();
 $('viewerClose').onclick = () => $('viewer').close();
-$('viewer').addEventListener('close', () => { $('viewerVideo').pause(); $('viewerVideo').removeAttribute('src'); });
+$('viewer').addEventListener('close', () => {
+  card.viewing = null; // a full size still on its way must not land in the next photo opened
+  $('viewerVideo').onerror = null;
+  $('viewerVideo').pause(); $('viewerVideo').removeAttribute('src');
+});
 $('viewer').onclick = e => { if (e.target === $('viewer')) $('viewer').close(); };
 api('/api/photos').then(list => list.reverse().forEach(p => addPhoto(p)));
+
+// ---------- photos folder ----------
+// Picked on the laptop (the gear in Shots); every page's strip then shows the new folder.
+let folder = null;
+function renderFolder(f) {
+  folder = f;
+  $('galleryHint').textContent = `Copied to ${f.path} as they’re taken`;
+  $('galleryHint').title = f.path;
+}
+function reloadShots() {
+  shownPhotos.clear(); $('strip').replaceChildren(); renderStack();
+  api('/api/photos').then(list => list.reverse().forEach(p => addPhoto(p))).catch(() => {});
+}
+function folderStatus(msg, cls = '') { $('folderStatus').textContent = msg; $('folderStatus').className = `hint ${cls}`; }
+api('/api/folder').then(f => { renderFolder(f); if (f.error) toast(f.error, true); }).catch(() => {});
+events.addEventListener('folder', e => { renderFolder(JSON.parse(e.data)); reloadShots(); });
+$('folderBtn').onclick = () => {
+  $('folderInput').value = folder?.path || '';
+  if (folder?.error) folderStatus(folder.error, 'bad');
+  else folderStatus(folder && folder.path === folder.default ? 'This is the default folder.' : '');
+  $('folderDialog').showModal();
+  $('folderInput').select();
+};
+$('folderClose').onclick = () => $('folderDialog').close();
+async function saveFolder(path) {
+  folderStatus('Checking the folder…');
+  for (const b of ['folderSave', 'folderDefault']) $(b).disabled = true;
+  try {
+    const f = await api('/api/folder', { path });
+    renderFolder(f); reloadShots();
+    $('folderInput').value = f.path;
+    folderStatus(`Shots now save to ${f.path}`, 'good');
+  } catch (e) { folderStatus(e.message, 'bad'); }
+  finally { for (const b of ['folderSave', 'folderDefault']) $(b).disabled = false; }
+}
+$('folderForm').onsubmit = e => { e.preventDefault(); saveFolder($('folderInput').value); };
+$('folderDefault').onclick = () => saveFolder('');
+
+// ---------- the camera's card ----------
+// Older shots still on the card: pick some and they're copied into the shots folder like new ones.
+const card = { files: [], next: 0, picked: new Set(), selecting: false, loading: false, busy: false, viewing: null };
+function cardStatus(msg, bad = false) { $('cardStatus').textContent = msg; $('cardStatus').classList.toggle('bad', bad); }
+async function loadCard(reset) {
+  if (card.loading) return;
+  if (reset) { card.files = []; card.next = 0; card.picked.clear(); card.selecting = false; $('cardGrid').replaceChildren(); }
+  if (card.next === null) return;
+  card.loading = true;
+  cardStatus('Reading the card…');
+  try {
+    const r = await api(`/api/card?start=${card.next}`);
+    card.next = r.next;
+    r.files.forEach(addCardFile);
+    cardStatus(card.files.length ? 'Tap to view · long-press or Select to pick several' : 'No photos on the card');
+  } catch (e) { return cardStatus(e.message, true); }
+  finally { card.loading = false; renderCard(); }
+  if (nearCardEnd()) loadCard(); // the page didn't fill the grid, so there's nothing to scroll yet
+}
+const nearCardEnd = () => { const g = $('cardGrid'); return g.scrollHeight - g.scrollTop - g.clientHeight < 300; };
+function addCardFile(f) {
+  card.files.push(f);
+  const b = document.createElement('button');
+  b.className = 'card-file' + (f.downloaded ? ' done' : '');
+  b.title = `${f.name} · ${(f.size / 1e6).toFixed(1)} MB${f.downloaded ? ' · already copied' : ''}`;
+  b.dataset.handle = f.handle;
+  const img = new Image();
+  img.alt = f.name; img.loading = 'lazy'; img.draggable = false; img.src = `/api/card/thumb?h=${f.handle}`;
+  img.onerror = () => img.replaceWith(Object.assign(document.createElement('span'), { className: 'card-name', textContent: f.name }));
+  b.append(img);
+  if (f.video) b.insertAdjacentHTML('beforeend', '<span class="play">▶</span>');
+  // A long press starts picking, like a phone's photo gallery; the click that ends it is swallowed.
+  b.onpointerdown = () => {
+    clearTimeout(press.timer); press.long = false;
+    press.timer = setTimeout(() => { press.long = true; card.selecting = true; card.picked.add(f.handle); renderCard(); navigator.vibrate?.(15); }, 500);
+  };
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => clearTimeout(press.timer));
+  b.oncontextmenu = e => e.preventDefault();
+  b.onclick = () => {
+    if (press.long) { press.long = false; return; }
+    if (!card.selecting) return viewCardFile(f);
+    card.picked.has(f.handle) ? card.picked.delete(f.handle) : card.picked.add(f.handle);
+    renderCard();
+  };
+  $('cardGrid').append(b);
+}
+const press = { timer: 0, long: false };
+
+// Shows the thumbnail at once, then swaps in the full size when the camera has sent it.
+function viewCardFile(f) {
+  const src = `/api/card/view?h=${f.handle}`, size = `${(f.size / 1e6).toFixed(1)} MB`;
+  const raw = !/\.(jpe?g|mov|mp4)$/i.test(f.name);
+  card.viewing = f.handle;
+  openViewer({
+    video: f.video, src: f.video ? src : `/api/card/thumb?h=${f.handle}`, href: raw ? null : src, name: f.name,
+    caption: `${f.name} · ${size} · ${f.video ? 'loading from the camera…' : 'loading full size…'}`,
+  });
+  const done = msg => { if ($('viewer').open && card.viewing === f.handle) $('viewerName').textContent = `${f.name} · ${size}${msg ? ` · ${msg}` : ''}`; };
+  if (f.video) {
+    $('viewerVideo').onloadeddata = () => done();
+    $('viewerVideo').onerror = () => done('couldn\'t play this video here. Copy it to the laptop instead');
+    return;
+  }
+  const full = new Image();
+  full.onload = () => {
+    if (!$('viewer').open || card.viewing !== f.handle) return;
+    $('viewerImg').src = full.src;
+    done(raw ? 'RAW, shown as its built-in JPEG' : '');
+  };
+  full.onerror = () => done('couldn\'t load the full size from the camera');
+  full.src = src;
+}
+function renderCard() {
+  for (const b of $('cardGrid').children) b.setAttribute('aria-pressed', card.picked.has(+b.dataset.handle));
+  $('cardDownload').disabled = !card.picked.size || card.busy;
+  $('cardDownload').textContent = card.picked.size ? `Copy ${card.picked.size} to laptop` : 'Copy to laptop';
+  $('cardNew').disabled = card.busy;
+  $('cardGrid').classList.toggle('selecting', card.selecting);
+  $('cardSelect').textContent = card.selecting ? 'Cancel' : 'Select';
+  $('cardSelect').setAttribute('aria-pressed', card.selecting);
+}
+$('cardSelect').onclick = () => { card.selecting = !card.selecting; if (!card.selecting) card.picked.clear(); renderCard(); };
+// The whole card, not just what's been scrolled to: the rest is listed first.
+$('cardAll').onclick = async () => {
+  $('cardAll').disabled = true;
+  while (card.next !== null) {
+    if (card.loading) { await sleep(100); continue; }
+    const had = card.files.length;
+    await loadCard();
+    if (card.files.length === had) break; // the listing failed; its error is showing
+  }
+  $('cardAll').disabled = false;
+  for (const f of card.files) card.picked.add(f.handle);
+  card.selecting = true;
+  renderCard();
+};
+$('cardBtn').onclick = () => { $('cardDialog').showModal(); if (!card.busy) loadCard(true); };
+$('cardGrid').addEventListener('scroll', () => { if (nearCardEnd()) loadCard(); }, { passive: true });
+$('cardClose').onclick = () => $('cardDialog').close();
+$('cardNew').onclick = () => {
+  for (const b of $('cardGrid').children) if (!b.classList.contains('done')) card.picked.add(+b.dataset.handle);
+  card.selecting = true;
+  renderCard();
+};
+// The server copies in the background; this polls its progress, which also works over the tunnel.
+$('cardDownload').onclick = async () => {
+  const handles = [...card.picked];
+  try { await api('/api/card/download', { handles }); } catch (e) { return cardStatus(e.message, true); }
+  card.busy = true; renderCard();
+  let job = null, misses = 0;
+  while (misses < 10) {
+    await sleep(1000);
+    try { job = await api('/api/card/job'); misses = 0; } catch { misses++; continue; }
+    if (job.finished) break;
+    cardStatus(`Copying ${job.done} of ${job.total}…`);
+  }
+  card.busy = false;
+  if (!job?.finished) { cardStatus('Lost touch with the laptop while copying. Check the shots folder', true); return renderCard(); }
+  const failed = new Set(job.failed.map(f => f.handle));
+  for (const b of $('cardGrid').children) {
+    const h = +b.dataset.handle;
+    if (handles.includes(h) && !failed.has(h)) { b.classList.add('done'); card.picked.delete(h); }
+  }
+  const parts = [`${job.saved} copied`];
+  if (job.skipped) parts.push(`${job.skipped} already there`);
+  if (job.failed.length) parts.push(`${job.failed.length} failed: ${job.failed.slice(0, 3).map(f => `${f.name || 'photo'} (${f.error})`).join(', ')}${job.failed.length > 3 ? '…' : ''}`);
+  cardStatus(parts.join(' · '), job.failed.length > 0);
+  renderCard();
+};
 
 // ---------- controls ----------
 $('shutter').onclick = primaryAction;
@@ -1393,7 +1573,7 @@ $('phoneClose').onclick = () => $('phoneDialog').close();
 $('phoneDialog').addEventListener('close', () => clearTimeout(tunnelPoll));
 // Only the laptop itself may see the access key, so the button only appears there.
 let isLaptop = false;
-api('/api/remote').then(() => { isLaptop = true; $('phoneBtn').classList.remove('hidden'); initWebcamHost(); }).catch(() => {});
+api('/api/remote').then(() => { isLaptop = true; $('phoneBtn').classList.remove('hidden'); $('folderBtn').classList.remove('hidden'); initWebcamHost(); }).catch(() => {});
 
 // ---------- camera source: the USB camera or one of the laptop's webcams ----------
 // The laptop's page runs a picked webcam (webcam.js) and remembers the pick, so the desktop window

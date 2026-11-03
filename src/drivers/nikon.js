@@ -9,7 +9,7 @@ const INVALID_STATUS = 0xa004;
 export class NikonDriver extends PtpDriver {
   brand = 'Nikon';
   experimental = false;
-  features = { liveView: true, focusPoint: true, movie: true, autofocus: true };
+  features = { liveView: true, focusPoint: true, movie: true, autofocus: true, card: true };
   onlyListedProps = false;
   propMap = {}; // Nikon's units are the canonical ones
 

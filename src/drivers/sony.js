@@ -14,6 +14,10 @@ const PRESS = 2, RELEASE = 1;
 const OBJECTS_IN_MEMORY = 0xd215; // ≥ 0x8000 when a capture is waiting to be downloaded
 const CAPTURE_HANDLE = 0xffffc001;
 const LIVEVIEW_HANDLE = 0xffffc002;
+// Older bodies (a6500, a7 III and earlier) won't take these as values, only as one-click nudges
+// of the dial, so those are stepped toward the target, reading the value back after each click.
+const STEPPED = new Set([0x5007, 0xd100, 0x500f, 0x5010]);
+const MAX_STEPS = 40;
 // Codes the canonical tables don't name are kept apart from real ones by adding 0x10000.
 const lookup = table => v => table[v] ?? 0x10000 + v;
 const keep = (...codes) => Object.fromEntries(codes.map(c => [c, c]));
@@ -32,11 +36,12 @@ const BY_SONY = Object.fromEntries(Object.entries(MAP).map(([c, m]) => [m.code, 
 
 export class SonyDriver extends PtpDriver {
   brand = 'Sony';
-  features = { liveView: true, focusPoint: false, movie: true, autofocus: true };
+  features = { liveView: true, focusPoint: false, movie: true, autofocus: true, card: false }; // PC Remote mode doesn't expose the card
   propMap = MAP;
 
   async init() {
     this.raw = {};
+    this.stepOnly = new Set(); // settings this body has shown it only takes as dial clicks
     // The handshake: connect in three phases, reading the extension info in between.
     await this.send(SDIO.Connect, [1, 0, 0], { dir: 'read' });
     await this.send(SDIO.Connect, [2, 0, 0], { dir: 'read' });
@@ -89,13 +94,42 @@ export class SonyDriver extends PtpDriver {
   async setProp(code, value) {
     const n = this.native[code];
     const raw = n?.back.has(value) ? n.back.get(value) : value;
-    const { code: rc } = await this.send(SDIO.SetExtDevicePropValue, [n.code], { dir: 'write', data: encodeValue(n.type, raw) });
-    if (rc !== OK) throw new Error(respName(rc));
-    await sleep(200);
-    await this.readAll(true, code);
-    // Some bodies only take these from their own dials when the dial isn't set to the app.
-    if (this.cam.props[code]?.value !== value) throw new Error(`The camera didn't take that ${PROPS[code]}. Check its dial or settings`);
+    let rc = OK;
+    if (!this.stepOnly.has(code)) {
+      ({ code: rc } = await this.send(SDIO.SetExtDevicePropValue, [n.code], { dir: 'write', data: encodeValue(n.type, raw) }));
+      if (rc === OK) { await sleep(200); await this.readAll(true, code); }
+    }
+    if (this.cam.props[code]?.value !== value && STEPPED.has(code)) {
+      await this.stepTo(code, value);
+      if (this.cam.props[code]?.value === value) this.stepOnly.add(code);
+    }
+    if (this.cam.props[code]?.value !== value) {
+      if (rc !== OK && !STEPPED.has(code)) throw new Error(respName(rc));
+      // Some bodies only take these from their own dials when the dial isn't set to the app.
+      throw new Error(`The camera didn't take that ${PROPS[code]}. Check its dial or settings`);
+    }
     if (code === MODE_CODE) for (const c of MODE_DEPENDENT) if (MAP[c]) this.publish(c, true);
+  }
+
+  // Clicks the camera's dial for this setting toward `value`. Which way +1 turns it isn't the same
+  // for every setting, so a click that doesn't move toward the target flips the direction.
+  async stepTo(code, value) {
+    const prop = this.native[code].code, vals = this.cam.props[code].values ?? [];
+    const byIndex = vals.includes(value) && vals.includes(this.cam.props[code].value);
+    const key = v => byIndex ? vals.indexOf(v) : code === 0xd100 ? (v === 0xffffffff ? 1e9 : (v >>> 16) / (v & 0xffff)) : v;
+    let dir = key(value) < key(this.cam.props[code].value) ? -1 : 1, misses = 0;
+    for (let i = 0; i < MAX_STEPS && this.cam.props[code].value !== value; i++) {
+      const was = Math.abs(key(value) - key(this.cam.props[code].value));
+      const { code: rc } = await this.send(SDIO.ControlDevice, [prop], { dir: 'write', data: Buffer.from([dir & 0xff]) });
+      if (rc !== OK) return;
+      // read back as soon as the click lands, rather than waiting a fixed time
+      const before = this.cam.props[code].value;
+      for (let t = 0; t < 10 && this.cam.props[code].value === before; t++) { await sleep(50); await this.readAll(true, code); }
+      const gap = Math.abs(key(value) - key(this.cam.props[code].value));
+      if (gap < was) continue;
+      if (++misses > 2) return; // stuck, or the value sits between two clicks
+      dir = -dir; // the wrong way, or already at the end that way
+    }
   }
 
   button(prop, state) {

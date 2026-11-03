@@ -18,6 +18,7 @@ export const Op = {
   NikonChangeCameraMode: 0x90c2,
   NikonAfDrive: 0x90c1,
   NikonCheckEvent: 0x90c7,
+  NikonGetLargeThumb: 0x90c4, // a ~1.6k px JPEG preview, RAW files included
   NikonDeviceReady: 0x90c8,
   NikonGetVendorPropCodes: 0x90ca,
   NikonStartLiveView: 0x9201,
@@ -50,7 +51,7 @@ export function parseLiveViewHeader(buf) {
 
 export const Resp = {
   0x2001: 'OK', 0x2002: 'General error', 0x2005: 'Operation not supported', 0x2019: 'Device busy',
-  0x2003: 'Session not open', 0xa001: 'Hardware error', 0xa002: 'Out of focus',
+  0x2003: 'Session not open', 0x2007: 'Incomplete transfer', 0x2009: 'Photo no longer on the card', 0xa001: 'Hardware error', 0xa002: 'Out of focus',
   0xa003: 'Change camera mode failed', 0xa004: 'Invalid status', 0xa005: 'Set property not supported',
   0xa008: 'Shutter speed is Bulb', 0xa00a: 'Mode does not allow aperture change', 0xa00b: 'Not in live view', 0x201d: 'Invalid parameter',
   0x201c: 'Invalid device prop value', 0x200f: 'Access denied', 0x200c: 'Store full', 0x2013: 'Store not available',
@@ -152,6 +153,8 @@ export function parseObjectInfo(buf) {
     assocType: r.u16(), assocDesc: r.u32(), sequence: r.u32(),
   };
   info.filename = r.str();
+  // "YYYYMMDDThhmmss"; some cameras end the dataset early, so it's optional.
+  try { info.captureDate = r.str(); } catch { info.captureDate = ''; }
   return info;
 }
 

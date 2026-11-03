@@ -12,7 +12,7 @@
     "start": "node src/server.js",
     "app": "electron .",
     "dist": "electron-builder --win",
-    "test": "node test/drivers.test.js && node test/scenes.test.js && node test/webcam.test.js",
+    "test": "node test/drivers.test.js && node test/scenes.test.js && node test/webcam.test.js && node test/card.test.js",
     "probe": "node scripts/probe.js",
     "vendor": "node scripts/vendor.js",
     "postinstall": "node scripts/vendor.js"

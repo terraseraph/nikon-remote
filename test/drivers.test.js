@@ -132,6 +132,29 @@ await sd.capture();
 assert.deepEqual(sony.calls.map(c => [c.params[0], c.data.readUInt16LE(0)]), [[0xd2c1, 2], [0xd2c2, 2], [0xd2c2, 1], [0xd2c1, 1]]);
 console.log('✓ Sony: settings decode, write, capture sequence, download');
 
+// an older body takes no aperture value, only dial clicks; here +1 closes the aperture down
+const oldApertures = [400, 560, 800, 1100];
+const oldSony = fakeCam({ manufacturer: 'Sony Corporation', model: 'ILCE-6500', operations: [0x9201], properties: [] }, (op, params, opts) => {
+  if (op === 0x9209) return { code: OK, data: sonyAll() };
+  if (op === 0x9205) return { code: 0x2005 };
+  if (op === 0x9207 && params[0] === 0x5007) {
+    const i = oldApertures.indexOf(sonyState.aperture) + (opts.data.readInt8(0) > 0 ? -1 : 1);
+    sonyState.aperture = oldApertures[Math.max(0, Math.min(oldApertures.length - 1, i))];
+  }
+});
+sonyState = { aperture: 400, objects: 0 };
+const osd = new SonyDriver(oldSony.cam);
+await osd.init();
+await osd.loadProps();
+await osd.setProp(0x5007, 800);
+assert.equal(show(oldSony.cam.props, 0x5007), 'f/8');
+oldSony.calls.length = 0;
+await osd.setProp(0x5007, 560);
+assert.equal(show(oldSony.cam.props, 0x5007), 'f/5.6');
+assert.ok(!oldSony.calls.some(c => c.op === 0x9205), 'once stepping worked, the direct set is skipped');
+await assert.rejects(osd.setProp(0x500e, 1), /didn't take|0x2005|Operation/);
+console.log('✓ Sony: older bodies step the dial to the value');
+
 // ---------- Generic PTP ----------
 function ptpDesc(code, type, current, values) {
   const w = type === 4 ? 2 : 4, b = [];
