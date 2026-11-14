@@ -58,6 +58,11 @@ Built and tested on a **Nikon Z50II**, with experimental support for **Canon EOS
 - **Phone remote:** scan a QR code and use your phone as the remote on the same Wi-Fi. Access is protected by a private key carried in the QR code.
 - **From anywhere:** one switch starts a Cloudflare Tunnel for a public https address, so the phone works on mobile data too. Live view is tuned for slow uploads (about 7–8 fps on a 4.6 Mbit/s connection).
 
+### Backup
+- **Every shot, copied somewhere else as it lands:** to [ShotDrop](https://github.com/terraseraph/ShotDrop) on the same PC, or to any FTP server (a NAS, another computer running ShotDrop, a hosting account). See [Backup](#backup-1).
+- **ShotDrop is found automatically** when it's running on the PC, so there's nothing to set up.
+- **Nothing gets lost:** shots wait in a queue while the server is unreachable or the app is closed, and go across when it's back. Each thumbnail shows a tick once its shot is backed up.
+
 ## Supported cameras
 
 The app identifies the camera from what it reports over USB and picks a driver for it. The connection bar shows the brand and model, and "(experimental)" for anything untested.
@@ -210,6 +215,17 @@ Then set `CF_TUNNEL=nikon` and `CF_TUNNEL_URL=https://camera.example.com`. For a
 
 Over the tunnel the phone pulls live view frames instead of receiving a pushed stream, the camera drops to 640px live view, and frames are re-encoded at JPEG quality 60 (about 70 KB → 21 KB). That keeps live view current on a slow home upload.
 
+## Backup
+
+Under **More › Backup**, pick where each shot should also go. The status shows in the top bar (a cloud icon, with a count while shots are waiting) and in the Shots drawer.
+
+- **ShotDrop:** if [ShotDrop](https://github.com/terraseraph/ShotDrop) is running on the same PC, Nikon Remote finds it on its local API (port 8787), reads its FTP port and login from it, and uploads into it over FTP on `127.0.0.1`. Shots then show up in ShotDrop's gallery and sync on to wherever ShotDrop sends them (Google Drive, Dropbox, a NAS…). The two apps still run fine without each other. If ShotDrop is closed, shots wait and go across once it starts.
+- **FTP server:** enter the server, port, user name, password and folder, and **Test** it. Turn on **Encrypt (FTPS)** for servers that support explicit TLS, which you'll want for anything outside your own network. Shots go into a folder per day inside the folder you pick. This also works for ShotDrop running on another computer: use that computer's address, ShotDrop's FTP port (2121) and its camera login.
+
+Each file is uploaded as `name.part` and renamed once it's complete, so the server never sees half a file. **Back up earlier shots** queues everything already in `Pictures/Nikon Remote` that hasn't gone to the current destination. Switching to a different destination starts that list over.
+
+The settings (FTP password included) are saved in the app's data folder as `backup.json`, and the queue in `backup-queue.json`. Only the laptop can see or change them; a phone sees the status and the ticks.
+
 ## Voice engines
 
 Pick one under **More › Triggers › Engine**. The choice is remembered on each device, so the laptop and a phone can use different ones.
@@ -253,6 +269,7 @@ The Z50II only records when its **photo/video switch** is on video; the app tell
 - **Voice** stays on the laptop with the Whisper, Vosk and Windows engines. The Chrome or Edge engine sends the audio to Google's or Microsoft's speech service.
 - **Gestures and pose matching** run locally in the browser, and the MediaPipe runtime and models ship with the app, so they work offline. A phone using the app over the Cloudflare tunnel loads them from jsDelivr and Google's model storage instead, which is faster than pulling them through the laptop's upload. `npm run vendor` re-downloads the bundled copies, for changing their versions.
 - **Clap** detection is fully local.
+- **Backup** only sends shots to the destination you pick. Plain FTP isn't encrypted, so turn on FTPS for a server outside your own network.
 - **Shot assist and inspo** send the live view frame to your chosen AI provider, and search terms to the photo services, only when you ask. Keep that in mind for private or client sessions.
 
 ### Known limits
@@ -278,6 +295,7 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
   - `canon.js`: Canon EOS remote mode, `GetEvent` settings and downloads, viewfinder data, release on/off
   - `sony.js`: Sony SDIO handshake, button-style controls, in-memory captures and live view handles
 - `src/webcam.js` is a webcam as a camera source with the same surface as `camera.js`. The laptop's page (`public/webcam.js`) runs the webcam: it holds a command stream open (SSE), pushes JPEG frames into the same live view path the USB camera uses, and uploads photos and video; `public/webcam-props.js` maps the webcam's capabilities to the app's camera properties and back. `src/frames.js` (live view frames and viewers) and `src/photos.js` (the captures folder) are shared by both sources.
+- `src/backup.js` keeps the backup queue and uploads each shot over FTP (with [basic-ftp](https://github.com/patrickjuchli/basic-ftp)), finding ShotDrop through its local API when that's the destination.
 - `src/server.js` serves the JSON API, the SSE event stream, MJPEG live view and the app itself. `src/advisor.js` and `src/inspo.js` handle the AI features and photo search; `src/tunnel.js` runs `cloudflared`; `src/voice.js` runs the Whisper (`engines/whisper/whisper-server.exe`) and Windows (`bridge/speech.ps1`) voice engines.
 - `electron/main.js` runs the same server inside Electron and opens it in a window.
 - `public/` is the app: `app.js` for the UI and shooting sequences, `scenes.js` for the shot assist scene presets, `liveview.js` for the MJPEG-to-canvas reader, `inspo.js` and `pose.js` for references and pose matching, and `triggers/` for voice, gestures and clap.
@@ -287,10 +305,10 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
 | Method | Path | Body |
 | --- | --- | --- |
 | GET | `/api/state` | |
-| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets`, `config` (API keys changed). `state` includes `source` (`camera` or `webcam`), `webcams` and `usbCamera` |
+| GET | `/api/events` | SSE: `state`, `prop`, `photo`, `shot`, `log`, `presets`, `config` (API keys changed), `backup` (status), `backup-photo` (one shot's backup state). `state` includes `source` (`camera` or `webcam`), `webcams` and `usbCamera` |
 | GET | `/api/liveview.mjpg` | |
 | GET | `/api/liveview.jpg?after=N` | Next frame newer than `N`, re-encoded smaller; `X-Seq` and `X-AF` headers |
-| GET | `/api/photos` | |
+| GET | `/api/photos` | Each with `backup`: `done`, `uploading`, `queued`, `failed` or `null` |
 | POST | `/api/shoot` | `{ "af": true }` |
 | POST | `/api/af` | |
 | POST | `/api/focus-point` | `{ "x": 0.3, "y": 0.5, "focus": true }` (fractions of the frame) |
@@ -306,6 +324,9 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
 | POST | `/api/tunnel` | `{ "on": true }` (PC only) |
 | GET / POST | `/api/settings` | `{ "keys": { "PEXELS_API_KEY": "…" } }`, `""` clears one; returns only set/source/last 4 (PC only) |
 | POST | `/api/settings/test` | `{ "name": "OPENROUTER_API_KEY", "value": "…" }` (PC only) |
+| GET / POST | `/api/backup` | `{ "mode": "off" \| "shotdrop" \| "ftp", "ftp": { "host", "port", "user", "pass", "dir", "tls" } }`; `pass` left out keeps the saved one, and is never returned (PC only) |
+| POST | `/api/backup/test` | Same body; connects and makes the folder without uploading (PC only) |
+| POST | `/api/backup/earlier`, `/api/backup/retry` | Queue earlier shots; retry waiting shots now (PC only) |
 | POST | `/api/reconnect` | |
 | POST | `/api/source` | `{ "source": "camera" }`: back to the USB camera. A webcam is picked by the laptop page opening `/api/webcam/host` |
 | GET | `/api/webcam/host?device=…&label=…` | SSE command stream for the page running the webcam (PC only) |
@@ -316,7 +337,7 @@ laptop page (webcam host) ──getUserMedia──▶ webcam; frames, photos, vi
 
 ### Configuration
 
-API keys are best added in the app (**More › AI**). Everything else is an environment variable, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection; the gear in **Shots** on the laptop picks another folder, after checking the app can write and read there), `DATA_DIR` (where keys, presets and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
+API keys are best added in the app (**More › AI**). Everything else is an environment variable, usually set in `.env`. See [`.env.example`](.env.example) for the full list: API keys, `PORT` (default 8765), `LAN`, `CAPTURES_DIR` (default `Pictures/Nikon Remote`, following OneDrive redirection; the gear in **Shots** on the laptop picks another folder, after checking the app can write and read there), `DATA_DIR` (where keys, presets, backup settings and thumbnails are written), and the `CF_TUNNEL*` tunnel settings.
 
 ## License
 

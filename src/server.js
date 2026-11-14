@@ -17,6 +17,7 @@ import { advise, advisorConfig, SCENES } from './advisor.js';
 import { findInspo, inspoConfig, proxyImage } from './inspo.js';
 import { loadSettings, saveSettings, settingsView, testKey } from './settings.js';
 import { transcribe, voiceEngines, stopVoice } from './voice.js';
+import { Backup } from './backup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -75,7 +76,7 @@ function setFolder(path) {
   const dir = checkFolder(custom ? path : DEFAULT_CAPTURES);
   if (custom) writeFileSync(FOLDER_FILE, JSON.stringify({ captures: dir }, null, 2));
   else rmSync(FOLDER_FILE, { force: true });
-  CAPTURES = camera.capturesDir = webcam.capturesDir = dir;
+  CAPTURES = camera.capturesDir = webcam.capturesDir = backup.capturesDir = dir;
   folderError = null;
   broadcast('folder', folderView()); // every open page reloads its shots from the new folder
   return folderView();
@@ -83,7 +84,10 @@ function setFolder(path) {
 
 const camera = new Camera({ capturesDir: CAPTURES, thumbsDir: THUMBS });
 const webcam = new Webcam({ capturesDir: CAPTURES, thumbsDir: THUMBS });
+// Copies each shot to ShotDrop on this PC or an FTP server, when switched on (More › Backup).
+const backup = new Backup({ dataDir: DATA, capturesDir: CAPTURES });
 const clients = new Set();
+const withBackup = p => ({ ...p, backup: backup.stateOf(p.day, p.name) });
 
 // Which source the shutter, settings and live view belong to. A webcam is picked on the laptop,
 // whose page then runs it; the USB camera stays connected in the background meanwhile, so photos
@@ -120,10 +124,13 @@ camera.on('state', () => {
 });
 for (const src of [camera, webcam]) {
   src.on('state', () => broadcast('state', fullState()));
-  src.on('photo', d => broadcast('photo', d)); // one gallery for both
+  src.on('photo', d => { backup.add(d.day, d.name); broadcast('photo', withBackup(d)); }); // one gallery for both
   for (const type of ['prop', 'shot']) src.on(type, d => src === active() && broadcast(type, d));
   src.on('log', m => { console.log(m); broadcast('log', m); });
 }
+backup.on('status', s => broadcast('backup', s));
+backup.on('photo', p => broadcast('backup-photo', p));
+backup.on('log', m => { console.log(m); broadcast('log', m); });
 // Proxies such as Cloudflare drop connections that stay silent for ~100 s; an SSE comment keeps them open.
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 25_000).unref();
 
@@ -250,7 +257,7 @@ function deny(res) {
 // ---------- routes ----------
 const routes = {
   'GET /api/state': () => fullState(),
-  'GET /api/photos': () => camera.listPhotos(),
+  'GET /api/photos': () => camera.listPhotos().map(withBackup),
   'POST /api/shoot': b => active().shoot({ af: !!b.af }),
   'POST /api/af': async () => ({ result: await active().autofocus() }),
   'POST /api/focus-point': b => active().setFocusPoint(+b.x, +b.y, { focus: b.focus !== false }),
@@ -321,6 +328,20 @@ const server = createServer(async (req, res) => {
         broadcast('config', {});
       }
       return json(res, 200, { ...settingsView(), on: { assist: !!advisorConfig().provider, inspo: inspoConfig().sources.length > 0 } });
+    } catch (e) { return json(res, 400, { error: e.message }); }
+  }
+  // Backup settings hold an FTP password, so only the laptop sees or changes them. Phones get the
+  // status line and gallery badges through the event stream.
+  if (path.startsWith('/api/backup')) {
+    if (!isLocal(req)) return json(res, 403, { error: 'Only available on the laptop' });
+    try {
+      const b = await body(req);
+      if (path === '/api/backup/test') return json(res, 200, await backup.test(b));
+      if (path === '/api/backup/earlier') return json(res, 200, { queued: backup.addEarlier() });
+      if (path === '/api/backup/retry') { backup.retryNow(); return json(res, 200, backup.status()); }
+      if (path !== '/api/backup') return json(res, 404, { error: 'Not found' });
+      if (req.method === 'POST') backup.save(b);
+      return json(res, 200, await backup.view());
     } catch (e) { return json(res, 400, { error: e.message }); }
   }
   // Offline voice: a page posts each spoken phrase as WAV and gets text back. Phones too, so
@@ -429,6 +450,7 @@ server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
 
 export async function shutdown() {
   tunnel.stop();
+  backup.stop();
   stopVoice();
   await webcam.close().catch(() => {});
   await camera.stopMovie().catch(() => {});

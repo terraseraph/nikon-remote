@@ -21,6 +21,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "basic-ftp": "6.2.4",
     "jpeg-js": "0.4.4"
   },
   "devDependencies": {

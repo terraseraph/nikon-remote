@@ -657,6 +657,9 @@ function addPhoto(p, fresh = false) {
     caption: `${p.day} · ${p.name} · ${(p.size / 1e6).toFixed(1)} MB`,
   });
   b.dataset.thumb = p.thumb;
+  b.dataset.key = `${p.day}/${p.name}`;
+  b.insertAdjacentHTML('beforeend', '<span class="bk hidden"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>');
+  setBackupBadge(b, p.backup);
   if (fresh) { b.classList.add('new'); setTimeout(() => b.classList.remove('new'), 2000); }
   $('strip').prepend(b);
   renderStack(fresh);
@@ -914,7 +917,7 @@ $('ruler').addEventListener('wheel', e => {
 }, { passive: false });
 
 // ---------- advanced drawer ----------
-const TABS = ['capture', 'exposure', 'triggers', 'advisor'];
+const TABS = ['capture', 'exposure', 'triggers', 'advisor', 'backup'];
 let tab = 'capture';
 function showTab(name) {
   const dir = TABS.indexOf(name) >= TABS.indexOf(tab) ? 1 : -1;
@@ -1714,6 +1717,114 @@ $('keysForm').onsubmit = e => {
 loadKeys();
 // Sent after keys change on the laptop, to every open page including the phone's.
 events.addEventListener('config', () => { loadAdvisor(); if (!$('keysForm').classList.contains('hidden')) loadKeys(); });
+
+// ---------- backup: each shot also goes to ShotDrop on this PC or an FTP server ----------
+const BK_BADGE = { done: 'Backed up', uploading: 'Uploading…', queued: 'Waiting to back up', failed: 'Backup failed: retrying' };
+function setBackupBadge(btn, st) {
+  const el = btn.querySelector('.bk');
+  el.className = `bk${st ? ` ${st}` : ' hidden'}`;
+  el.title = BK_BADGE[st] || '';
+}
+events.addEventListener('backup-photo', e => {
+  const p = JSON.parse(e.data);
+  const b = $('strip').querySelector(`[data-key="${CSS.escape(`${p.day}/${p.name}`)}"]`);
+  if (b) setBackupBadge(b, p.state);
+});
+
+let bkStatus = { mode: 'off', phase: 'off', pending: 0 };
+let bkCfg = null;      // the laptop's backup settings; null on a phone
+let bkShown = 'off';   // the picked mode: FTP stays unsaved until its form is
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+function backupText(s) {
+  const left = plural(s.pending, 'shot');
+  switch (s.phase) {
+    case 'idle': return [`All shots backed up to ${s.target}`, ''];
+    case 'uploading': return [`Uploading ${s.current} to ${s.target}`, s.pending > 1 ? `${s.pending - 1} more waiting` : ''];
+    case 'waiting': return [`${left} waiting for ${s.target}`, s.failed ? `${plural(s.failed, 'shot')} failed and will be retried` : ''];
+    case 'error': return [`Can't reach ${s.target}: ${s.error}`, s.pending ? `${left} waiting. Trying again shortly.` : 'Trying again with the next shot.'];
+    default: return ['Backup is off', ''];
+  }
+}
+function renderBackup() {
+  const s = bkStatus, on = s.mode !== 'off';
+  const [line, sub] = backupText(s);
+  const pill = $('backupPill');
+  pill.className = `pill bkpill ${s.phase}${on ? '' : ' hidden'}`;
+  pill.title = `${line}${sub ? `. ${sub}` : ''}`;
+  $('backupCount').textContent = s.pending && s.phase !== 'idle' ? s.pending : '';
+  $('backupLine').textContent = on ? line : '';
+  $('backupLine').className = `hint bkline${s.phase === 'error' ? ' error' : ''}`;
+  $('bkStatus').className = `bkstatus ${s.phase}`;
+  $('bkStatus').replaceChildren(line, ...(sub ? [make('small', { textContent: sub })] : []));
+  $('bkRetry').classList.toggle('hidden', !bkCfg || !(s.phase === 'error' || s.failed));
+  $('bkEarlier').classList.toggle('hidden', !bkCfg || !on);
+}
+events.addEventListener('backup', e => { bkStatus = JSON.parse(e.data); renderBackup(); });
+
+function sdHint(sd) {
+  if (bkShown === 'ftp') return '';
+  if (!sd) return bkShown === 'shotdrop'
+    ? 'ShotDrop isn\'t running on this PC. Shots wait here and go across once it starts.'
+    : 'ShotDrop isn\'t running on this PC. An FTP server works too, including ShotDrop on another computer.';
+  if (!sd.ftpOn) return 'ShotDrop is running, but its FTP server is off. Turn it on in ShotDrop.';
+  return bkShown === 'shotdrop'
+    ? `Sending to ShotDrop on this PC (its FTP server, port ${sd.ftpPort}). Nothing to set up: Nikon Remote gets the login from ShotDrop.`
+    : 'ShotDrop is running on this PC. Pick ShotDrop to send it every shot, with nothing to set up.';
+}
+function renderBackupSettings() {
+  const c = bkCfg;
+  $('bkSet').classList.toggle('hidden', !c);
+  $('bkRemote').classList.toggle('hidden', !!c);
+  if (c) {
+    pickSeg($('bkMode'), $('bkMode').querySelector(`[data-mode="${bkShown}"]`));
+    $('bkSdHint').textContent = sdHint(c.shotdrop);
+    $('bkSdHint').classList.toggle('hidden', !$('bkSdHint').textContent);
+    $('bkFtp').classList.toggle('hidden', bkShown !== 'ftp');
+    const f = $('bkFtp').elements;
+    f.host.value = c.ftp.host; f.port.value = c.ftp.port; f.user.value = c.ftp.user; f.dir.value = c.ftp.dir; f.tls.checked = c.ftp.tls;
+    f.pass.value = ''; f.pass.placeholder = c.ftp.passSet ? '•••••••• (saved)' : 'None';
+    bkStatus = c.status;
+  }
+  renderBackup();
+}
+const loadBackup = () => api('/api/backup').then(c => { bkCfg = c; bkShown = c.mode; renderBackupSettings(); })
+  .catch(() => { bkCfg = null; renderBackupSettings(); });
+async function saveBackup(patch, done) {
+  try { bkCfg = await api('/api/backup', patch); bkShown = bkCfg.mode; renderBackupSettings(); if (done) toast(done); }
+  catch (e) { toast(e.message, true); }
+}
+function ftpForm() {
+  const f = $('bkFtp').elements;
+  return { host: f.host.value.trim(), port: +f.port.value || 21, user: f.user.value.trim(), dir: f.dir.value.trim() || '/', tls: f.tls.checked,
+    ...(f.pass.value && { pass: f.pass.value }) };
+}
+for (const b of $('bkMode').querySelectorAll('button')) b.onclick = () => {
+  bkShown = b.dataset.mode;
+  if (bkShown === 'ftp' && !bkCfg.ftp.host) return renderBackupSettings(); // fill in the form first
+  saveBackup({ mode: bkShown }, bkShown === 'off' ? 'Backup off' : `Backing up to ${bkShown === 'ftp' ? bkCfg.ftp.host : 'ShotDrop'}`);
+};
+$('bkFtp').onsubmit = e => {
+  e.preventDefault();
+  saveBackup({ mode: 'ftp', ftp: ftpForm() }, 'Backup saved');
+};
+$('bkTest').onclick = async () => {
+  const btn = $('bkTest');
+  btn.disabled = true; btn.textContent = 'Testing…';
+  try { const r = await api('/api/backup/test', { mode: 'ftp', ftp: ftpForm() }); toast(`Connected to ${r.target}`); }
+  catch (e) { toast(e.message, true); }
+  btn.disabled = false; btn.textContent = 'Test';
+};
+$('bkRetry').onclick = () => api('/api/backup/retry', {}).catch(e => toast(e.message, true));
+$('bkEarlier').onclick = async () => {
+  try {
+    const { queued } = await api('/api/backup/earlier', {});
+    toast(queued ? `${plural(queued, 'earlier shot')} queued` : 'Every shot is already backed up');
+  } catch (e) { toast(e.message, true); }
+};
+$('backupPill').onclick = () => { toggleAdv(true, 'backup'); loadBackup(); };
+// Look for ShotDrop again whenever the tab is opened: it may have been started since.
+$('tabs').querySelector('[data-tab="backup"]').addEventListener('click', loadBackup);
+loadBackup();
 
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, select, textarea') || e.repeat || $('viewer').open || $('phoneDialog').open) return;

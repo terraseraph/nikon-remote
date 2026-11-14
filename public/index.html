@@ -14,6 +14,8 @@
   <select class="srcsel" id="sourceSel" aria-label="Camera source" title="Camera source: the USB camera or a webcam"></select>
   <span class="pill" title="Exposure mode (set on the camera's dial)">Mode <b id="modeBadge">–</b></span>
   <span class="pill hide-sm" title="Battery"><b id="batteryBadge">–</b></span>
+  <button class="pill bkpill hidden" id="backupPill" title="Backup (More › Backup)">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.3 9.6 4.5 4.5 0 0 0 7 18.5z"/><path d="M12 15.5v-5M9.5 12.5L12 10l2.5 2.5"/></svg><b id="backupCount"></b></button>
   <div class="spacer"></div>
   <div class="bgroup" role="group" aria-label="View">
     <button class="tbtn" id="gridBtn" title="Rule-of-thirds grid (G)" aria-pressed="false">
@@ -141,7 +143,7 @@
   </section>
   <div class="toast hidden" id="toast"></div>
   <div class="film" id="film">
-    <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span><span class="film-tools"><button id="cardBtn" class="ghost film-card hidden">Camera card</button><button id="folderBtn" class="ghost film-icon hidden" title="Where shots are saved" aria-label="Where shots are saved">
+    <div class="film-head"><span class="cap">Shots</span><span class="hint" id="galleryHint">Copied to Pictures &rsaquo; Nikon Remote as they&rsquo;re taken</span><span class="hint bkline" id="backupLine"></span><span class="film-tools"><button id="cardBtn" class="ghost film-card hidden">Camera card</button><button id="folderBtn" class="ghost film-icon hidden" title="Where shots are saved" aria-label="Where shots are saved">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button></span></div>
     <div class="strip" id="strip"></div>
   </div>
@@ -189,6 +191,7 @@
       <button role="tab" data-tab="exposure">Exposure</button>
       <button role="tab" data-tab="triggers">Triggers</button>
       <button role="tab" data-tab="advisor" title="Shot assist model and API keys">AI</button>
+      <button role="tab" data-tab="backup" title="Copy each shot to ShotDrop or an FTP server">Backup</button>
       <span class="bar"></span>
     </div>
 
@@ -275,6 +278,39 @@
         <p class="hint tight">Saved on this computer only, in the app's data folder. A key saved here is used instead of the one in <code>.env</code>.</p>
         <button class="as-go wide" id="keysSave">Save keys</button>
       </form>
+    </div>
+
+    <div class="pane hidden" data-pane="backup">
+      <p class="hint tight">Each shot is also sent somewhere else as soon as it&rsquo;s downloaded. Shots wait in a queue if it can&rsquo;t be reached, and go across when it can.</p>
+      <p class="hint tight hidden" id="bkRemote">Backup is set up on the laptop, under More &rsaquo; Backup.</p>
+      <div class="bkset" id="bkSet">
+        <span class="pcap">Back up to</span>
+        <div class="seg" id="bkMode" style="--n: 3"><span class="ind"></span>
+          <button data-mode="off">Off</button><button data-mode="shotdrop">ShotDrop</button><button data-mode="ftp">FTP server</button></div>
+        <p class="hint tight" id="bkSdHint"></p>
+        <form class="bkftp hidden" id="bkFtp" autocomplete="off">
+          <label class="field">Server<input name="host" placeholder="nas.local or 192.168.1.20" spellcheck="false"></label>
+          <div class="bkrow">
+            <label class="field">User name<input name="user" placeholder="anonymous" spellcheck="false" autocomplete="off"></label>
+            <label class="field bkport">Port<input name="port" type="number" min="1" max="65535" value="21"></label>
+          </div>
+          <label class="field">Password<input name="pass" type="password" autocomplete="new-password"></label>
+          <label class="field">Folder<input name="dir" placeholder="/Nikon Remote" spellcheck="false"></label>
+          <label class="opt">Encrypt (FTPS)<input type="checkbox" name="tls"><span class="sw"></span></label>
+          <p class="hint tight">Shots go into a folder per day, inside this folder. The password is saved on this computer only.</p>
+          <div class="bkbtns">
+            <button type="button" class="secondary" id="bkTest">Test</button>
+            <button class="as-go" id="bkSave">Save</button>
+          </div>
+        </form>
+      </div>
+      <div class="bkstat" id="bkStat">
+        <p class="bkstatus" id="bkStatus"></p>
+        <div class="bkbtns">
+          <button type="button" class="secondary hidden" id="bkRetry">Retry now</button>
+          <button type="button" class="secondary hidden" id="bkEarlier" title="Queue every shot in Pictures › Nikon Remote that isn't backed up here yet">Back up earlier shots</button>
+        </div>
+      </div>
     </div>
   </section>
 </aside>
